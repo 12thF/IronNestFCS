@@ -85,10 +85,6 @@ public class GunSystem {
             yield return new WaitForSeconds(1f);
         }
     }
-
-    public void Fire() {
-        gunController.RequestFire();
-    }
     
     public string? BulletInChamber() {
         return gunController?.ChamberedShellBlueprint?.shellDefinition?.DisplayName;
@@ -130,22 +126,18 @@ public class GunSystem {
             NextBullet();
             yield return new WaitForSeconds(2f);
         }
-        loadBulletButton?.OnClickDown();
-        yield return new WaitForSeconds(10f);
+        yield return FcsSceneInteractor.WaitAndClick(loadBulletButton!);
     }
 
-    public IEnumerator SelectPowder(int count) {
-        for (int i = 0; i < count; i++) {
-            powderButtons[i].OnClickDown();
-            yield return new WaitForSeconds(0.2f);
+    private IEnumerator SelectPowder(int count) {
+        for (var i = 0; i < count; i++) {
+            yield return FcsSceneInteractor.WaitAndClick(powderButtons[i]!);
         }
-        yield return new WaitForSeconds(3f);
     }
 
     public IEnumerator LoadPowder(int count) {
         yield return SelectPowder(count);
-        loadPowderButton?.OnClickDown();
-        yield return new WaitForSeconds(3f);
+        yield return FcsSceneInteractor.WaitAndClick(loadPowderButton!);
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
@@ -160,14 +152,14 @@ public class GunSystem {
 
     public IEnumerator WaitBackToIdle() {
         while (gunController.elevationChangeVelocity != 0) {
-            yield return new WaitForSeconds(1);
+            yield return new WaitForSeconds(0.1f);
         }
         yield return new WaitForSeconds(13);
     }
 
     public IEnumerator WaitFire() {
         while (!gunController.pendingReload) {
-            yield return new WaitForSeconds(1);
+            yield return new WaitForSeconds(0.1f);
         }
     }
 

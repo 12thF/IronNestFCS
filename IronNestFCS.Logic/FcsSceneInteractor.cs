@@ -1,4 +1,6 @@
-﻿using Il2CppTMPro;
+﻿using System.Collections;
+using Il2Cpp;
+using Il2CppTMPro;
 using IronNestFCS.Logic.FCS;
 using MelonLoader;
 using UnityEngine;
@@ -186,5 +188,13 @@ public class FcsSceneInteractor {
         // 锚点设到左上角，方便从左上往下排版（Center 会以几何中心为原点）。
         // tmp.alignment = TextAlignmentOptions.MidlineLeft;
         return go;
+    }
+    
+    public static IEnumerator WaitAndClick(LookAtTarget button) {
+        while (button.isActive == false) {
+            yield return new WaitForSeconds(0.2f);
+        }
+        yield return new WaitForSeconds(0.2f);
+        button.OnClickDown();
     }
 }

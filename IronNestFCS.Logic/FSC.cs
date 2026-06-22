@@ -4,6 +4,7 @@ using Il2Cpp;
 using IronNestFCS.Logic.FCS;
 using MelonLoader;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace IronNestFCS.Logic;
 
@@ -90,6 +91,8 @@ public class FSC
         IsBound &= Turret.TryBind();
         IsBound &= TriggerConsole.TryBind();
         MelonLogger.Msg("[FCS] 初始化完成，已绑定 DialInteractable。");
+        _runningCoroutines.Add(MelonCoroutines.Start(ExposeAllEntities()));
+        
         return true;
     }
 
@@ -116,6 +119,16 @@ public class FSC
         try { _harmony?.UnpatchSelf(); }
         catch (Exception ex) { MelonLogger.Error($"[FCS] UnpatchSelf 失败: {ex}"); }
         _harmony = null;
+    }
+
+    public IEnumerator ExposeAllEntities() {
+        while (true) {
+            foreach (var m in MapTable.GetAllFireMissionEntities()) {
+                m.GetComponent<Image>().enabled = true;
+            }
+
+            yield return new WaitForSeconds(1f);
+        }
     }
 
     /// <summary>

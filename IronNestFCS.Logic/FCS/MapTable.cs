@@ -8,6 +8,8 @@ public class MapTable {
     
     public Transform? turret;
     public Dictionary<int, Transform> artilleries;
+    public Transform fireMissionRoot;
+    public FireMission? FireMission;
     
     public bool TryBind() {
         artilleries = new Dictionary<int, Transform>();
@@ -21,6 +23,8 @@ public class MapTable {
             artilleries.Add(id, t);
         }
         MelonLogger.Msg($"[FCS] 找到 Player Turret Piece: {turret}, Artilleries: {artilleries.Count}");
+        fireMissionRoot = GameObject.Find("Fire Mission Root").transform;
+        FireMission = fireMissionRoot.GetComponent<FireMission>();
         return true;
     }
 
@@ -38,7 +42,15 @@ public class MapTable {
             distance = dist
         };
         return task;
+    }
 
+    public List<EntityLocation> GetAllFireMissionEntities() {
+        List<EntityLocation> res = new();
+        for (var i = 0; i < fireMissionRoot.childCount; ++i) {
+            var m = fireMissionRoot.GetChild(i).GetComponent<EntityLocation>();
+            res.Add(m);
+        }
+        return res;
     }
     
 }
