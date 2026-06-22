@@ -194,7 +194,7 @@ public class FcsSceneInteractor {
         while (button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) {
             yield return new WaitForSeconds(0.2f);
         }
-        yield return new WaitForSeconds(0.2f);
+        yield return new WaitForSeconds(0.5f);
         button.OnClickDown();
         yield return new WaitForSeconds(0.1f);
         button.OnClickUp();

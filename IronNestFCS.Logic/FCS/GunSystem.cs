@@ -103,6 +103,7 @@ public class GunSystem {
         foreach (var shell in shellSelector.bullets) {
             bullets.Add(shell?.GetComponent<ShellBlueprint>()?.shellDefinition?.ShellId);
         }
+        MelonLogger.Msg($"[FCS] GunSystem {_surfix}: Cylinder bullets: {string.Join(", ", bullets)}");
     }
 
     public void NextBullet() {
@@ -125,9 +126,19 @@ public class GunSystem {
             MelonLogger.Error($"[FCS] GunSystem {_surfix}: 没有 {type} 可以装填");
             yield break;
         }
-        for (var i = 0; i < index; i++) {
+
+        bool found = false;
+        for (var i = 0; i < bullets.Count; ++i) {
             NextBullet();
-            yield return new WaitForSeconds(2f);
+            yield return new WaitForSeconds(1.5f);
+            RefreshBullets();
+            if (bullets[0] != type.ToString()) continue;
+            found = true;
+            break;
+        }
+        if (!found) {
+            MelonLogger.Error($"[FCS] GunSystem {_surfix}: 转了一圈也没找到 {type}，当前弹仓状态: {string.Join(", ", bullets)}");
+            yield break;
         }
         yield return FcsSceneInteractor.WaitAndClick(loadBulletButton!);
     }

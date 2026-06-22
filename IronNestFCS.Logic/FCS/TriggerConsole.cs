@@ -54,37 +54,22 @@ public class TriggerConsole {
     }
     
     public IEnumerator ConfirmTask() {
-        yield return new WaitForSeconds(0.1f);
-        taskCheck.OnClickDown();
-        yield return new WaitForSeconds(0.1f);
-        taskCheck.OnClickUp();
+        yield return FcsSceneInteractor.WaitAndClick(taskCheck);
     }
 
     public IEnumerator ConfirmBullet() {
-        yield return new WaitForSeconds(0.1f);
-        bulletCheck.OnClickDown();
-        yield return new WaitForSeconds(0.1f);
-        bulletCheck.OnClickUp();
+        yield return FcsSceneInteractor.WaitAndClick(bulletCheck);
     }
 
     public IEnumerator ConfirmRotation() {
-        yield return new WaitForSeconds(0.1f);
-        rotationCheck.OnClickDown();
-        yield return new WaitForSeconds(0.1f);
-        rotationCheck.OnClickUp();
+        yield return FcsSceneInteractor.WaitAndClick(rotationCheck);
     }
 
     public IEnumerator ConfirmElevation() {
-        yield return new WaitForSeconds(0.1f);
-        elevationCheck.OnClickDown();
-        yield return new WaitForSeconds(0.1f);
-        elevationCheck.OnClickUp();
+        yield return FcsSceneInteractor.WaitAndClick(elevationCheck);
     }
 
     public IEnumerator ReadyToFire() {
-        yield return new WaitForSeconds(0.1f);
-        readyFire.OnClickDown();
-        yield return new WaitForSeconds(0.1f);
-        readyFire.OnClickUp();
+        yield return FcsSceneInteractor.WaitAndClick(readyFire);
     }
 }
