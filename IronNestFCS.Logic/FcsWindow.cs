@@ -51,7 +51,9 @@ public class FcsWindow
 
         if (!fcs.IsBound)
         {
-            GUI.Label(new Rect(x, y, w, h), "Waiting for game start. Or press F9 to reload.");
+            GUI.Label(new Rect(x, y, w, h), "Waiting for game start.");
+            y += h + gap;
+            GUI.Label(new Rect(x, y, w, h), "Or press F9 to manually reload.");
             return;
         }
 

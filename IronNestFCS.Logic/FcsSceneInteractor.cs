@@ -78,7 +78,8 @@ public class FcsSceneInteractor {
         var x = 0.3488f;
         for (var i = 1; i <= 4; i++) {
             var targetId = i;
-            var button = AddButton(() => {
+            GameObject button = null;
+            button = AddButton(() => {
                 var task = fcs.MapTable.GetMarkTarget(targetId);
                 if (task == null) {
                     return; // 地图上没有这个编号的目标
@@ -86,6 +87,12 @@ public class FcsSceneInteractor {
                 task.targetId = targetId;
                 task.bulletType = selectedBulletType;
                 fcs.EnqueueTask(task);
+                SetColor(button, Color.gray);
+                button.GetComponent<Collider>().enabled = false;
+                MelonCoroutines.Start(InvokeDelay(() => {
+                    SetColor(button, Color.red);
+                    button.GetComponent<Collider>().enabled = true;
+                }, 1f));
             }, Color.red);
             button.transform.position = new Vector3(x, -0.6916f, z);
             button.transform.localScale = Vector3.one * 0.02f;
@@ -192,4 +199,10 @@ public class FcsSceneInteractor {
         yield return new WaitForSeconds(0.1f);
         button.OnClickUp();
     }
+    
+    public static IEnumerator InvokeDelay(Action action, float delay) {
+        yield return new WaitForSeconds(delay);
+        action();
+    }
+    
 }
