@@ -21,8 +21,6 @@ public class FcsSceneInteractor {
 
     // 每个地图目标对应一个按钮：targetId -> 按钮。点击=用当前弹种为该目标入队一个任务。
     private readonly Dictionary<int, GameObject> targetButtons = new();
-    // 该目标当前有没有未完成任务在跑（避免重复入队）。
-    private readonly HashSet<int> activeTargets = new();
 
     public bool AutoFire = false;
 
@@ -81,17 +79,12 @@ public class FcsSceneInteractor {
         for (int i = 1; i <= 4; i++) {
             int targetId = i;
             GameObject button = AddButton(() => {
-                if (activeTargets.Contains(targetId)) {
-                    return; // 该目标已有任务在跑，忽略重复点击
-                }
                 var task = fcs.MapTable.GetMarkTarget(targetId);
                 if (task == null) {
                     return; // 地图上没有这个编号的目标
                 }
                 task.targetId = targetId;
                 task.bulletType = selectedBulletType;
-                activeTargets.Add(targetId);
-                SetColor(targetButtons[targetId], Color.gray);
                 fcs.EnqueueTask(task);
             }, Color.red);
             button.transform.position = new Vector3(x, -0.6916f, z);
@@ -105,12 +98,8 @@ public class FcsSceneInteractor {
         }
     }
 
-    /// <summary>任务完成回调：把对应目标按钮变红，并解除 active 标记以便再次下达。</summary>
+    /// <summary>任务完成回调</summary>
     public void TaskFinished(ArtilleryTask task) {
-        activeTargets.Remove(task.targetId);
-        if (targetButtons.TryGetValue(task.targetId, out var button)) {
-            SetColor(button, Color.red);
-        }
     }
     
     public void Update() {
