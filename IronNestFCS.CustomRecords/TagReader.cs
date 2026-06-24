@@ -1,4 +1,4 @@
-namespace IronNestFCS.CustomRecorder;
+namespace IronNestFCS.CustomRecords;
 
 /// <summary>
 /// 用 TagLib# 从音频文件里读取内嵌封面与标题。纯托管，不碰 Unity/IL2CPP。

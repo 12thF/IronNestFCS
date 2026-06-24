@@ -1,14 +1,15 @@
 using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using IronNestFCS.CustomRecords;
 using MelonLoader;
 using MelonLoader.Utils;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-[assembly: MelonInfo(typeof(IronNestFCS.CustomRecorder.CustomRecorderMod), "IronNestFCS.CustomRecorder", "0.2.0", "svr2kos2")]
+[assembly: MelonInfo(typeof(IronNestFCS.CustomRecords.CustomRecordsMod), "IronNestFCS.CustomRecords", "0.2.0", "svr2kos2")]
 [assembly: MelonGame("Iron Nest", "Iron Nest: Heavy Turret Simulator")]
 
-namespace IronNestFCS.CustomRecorder;
+namespace IronNestFCS.CustomRecords;
 
 /// <summary>
 /// 独立的 MelonMod：扫描 UserData/CustomRecords 下所有“带内嵌封面”的音频文件
@@ -22,7 +23,7 @@ namespace IronNestFCS.CustomRecorder;
 /// 只有“把结果塞回 Unity”这一步受 IL2CPP 约束，沿用已验证可用的 API（见各处注释）。
 /// 进场景后轮询 RecordDisk，出现时执行一次。
 /// </summary>
-public class CustomRecorderMod : MelonMod
+public class CustomRecordsMod : MelonMod
 {
     private readonly List<GameObject> diskClones = new();
     // 每张克隆盘各自持有的流式音轨状态：PCMReaderCallback 按需供数，必须保活托管侧
@@ -43,11 +44,11 @@ public class CustomRecorderMod : MelonMod
         done = true;
         try
         {
-            CreateCustomRecorders(src);
+            CreateCustomRecordss(src);
         }
         catch (Exception ex)
         {
-            MelonLogger.Error($"[CustomRecorder] Failed to create custom disks: {ex}");
+            MelonLogger.Error($"[CustomRecords] Failed to create custom disks: {ex}");
         }
     }
 
@@ -66,13 +67,13 @@ public class CustomRecorderMod : MelonMod
     /// 列出 CustomRecords 里所有受支持且带封面的文件，逐个克隆 RecordDisk 并装配。
     /// 多张盘沿原盘朝同一方向依次排开，避免叠在一起。
     /// </summary>
-    private void CreateCustomRecorders(GameObject src)
+    private void CreateCustomRecordss(GameObject src)
     {
         var dir = System.IO.Path.Combine(MelonEnvironment.UserDataDirectory, "CustomRecords");
         if (!System.IO.Directory.Exists(dir))
         {
             System.IO.Directory.CreateDirectory(dir);
-            MelonLogger.Msg($"[CustomRecorder] Created empty folder, drop audio files here: {dir}");
+            MelonLogger.Msg($"[CustomRecords] Created empty folder, drop audio files here: {dir}");
             return;
         }
 
@@ -87,7 +88,7 @@ public class CustomRecorderMod : MelonMod
 
         if (files.Count == 0)
         {
-            MelonLogger.Msg($"[CustomRecorder] No supported audio (.mp3/.wav/.flac) in {dir}");
+            MelonLogger.Msg($"[CustomRecords] No supported audio (.mp3/.wav/.flac) in {dir}");
             return;
         }
 
@@ -100,7 +101,7 @@ public class CustomRecorderMod : MelonMod
                 var cover = TagReader.ReadCover(file);
                 if (cover == null)
                 {
-                    MelonLogger.Warning($"[CustomRecorder] Skip (no embedded cover): {System.IO.Path.GetFileName(file)}");
+                    MelonLogger.Warning($"[CustomRecords] Skip (no embedded cover): {System.IO.Path.GetFileName(file)}");
                     continue;
                 }
 
@@ -109,11 +110,11 @@ public class CustomRecorderMod : MelonMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Error($"[CustomRecorder] Failed on {System.IO.Path.GetFileName(file)}: {ex}");
+                MelonLogger.Error($"[CustomRecords] Failed on {System.IO.Path.GetFileName(file)}: {ex}");
             }
         }
 
-        MelonLogger.Msg($"[CustomRecorder] Done: {placed} disk(s) created from {files.Count} file(s).");
+        MelonLogger.Msg($"[CustomRecords] Done: {placed} disk(s) created from {files.Count} file(s).");
     }
 
     /// <summary>
@@ -131,12 +132,12 @@ public class CustomRecorderMod : MelonMod
         }
         catch (Exception ex)
         {
-            MelonLogger.Error($"[CustomRecorder] Decode failed for {System.IO.Path.GetFileName(file)}: {ex}");
+            MelonLogger.Error($"[CustomRecords] Decode failed for {System.IO.Path.GetFileName(file)}: {ex}");
             return false;
         }
         if (samples.Length == 0 || channels <= 0 || sampleRate <= 0)
         {
-            MelonLogger.Warning($"[CustomRecorder] Empty/invalid audio: {System.IO.Path.GetFileName(file)}");
+            MelonLogger.Warning($"[CustomRecords] Empty/invalid audio: {System.IO.Path.GetFileName(file)}");
             return false;
         }
 
@@ -144,7 +145,7 @@ public class CustomRecorderMod : MelonMod
         var tex = CoverImage.Build(cover);
         if (tex == null)
         {
-            MelonLogger.Warning($"[CustomRecorder] Cover decode failed: {System.IO.Path.GetFileName(file)}");
+            MelonLogger.Warning($"[CustomRecords] Cover decode failed: {System.IO.Path.GetFileName(file)}");
             return false;
         }
 
@@ -170,7 +171,7 @@ public class CustomRecorderMod : MelonMod
         // 尽力设置显示名（字段在不同版本可能不同，存在才设）。
         TrySetDisplayName(recordItem, TagReader.ReadTitle(file));
 
-        MelonLogger.Msg($"[CustomRecorder] + {System.IO.Path.GetFileName(file)}  " +
+        MelonLogger.Msg($"[CustomRecords] + {System.IO.Path.GetFileName(file)}  " +
                         $"({(float)(samples.Length / channels) / sampleRate:F1}s, {channels}ch@{sampleRate}Hz)");
         return true;
     }
@@ -216,7 +217,7 @@ public class CustomRecorderMod : MelonMod
 
 /// <summary>
 /// 单张盘的流式播放状态：持有交错 float 样本与读游标，提供 PCM 回调。
-/// 每张盘一个实例，互不干扰。被 CustomRecorderMod 长期持有以防 GC。
+/// 每张盘一个实例，互不干扰。被 CustomRecordsMod 长期持有以防 GC。
 /// </summary>
 internal sealed class TrackPlayback
 {

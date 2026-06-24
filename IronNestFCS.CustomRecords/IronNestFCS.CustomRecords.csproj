@@ -5,11 +5,12 @@
         <TargetFramework>net6.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <AssemblyName>IronNestFCS.CustomRecorder</AssemblyName>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <GameDir>E:\Games\SteamLibrary\steamapps\common\IRON NEST Heavy Turret Simulator Demo</GameDir>
         <!-- 独立的 MelonMod，放进 Mods/ 由 MelonLoader 自动加载（无需热重载）。 -->
         <OutputPath>$(GameDir)\Mods\</OutputPath>
+        <PackageId>IronNestFCS.CustomRecords</PackageId>
+        <RootNamespace>IronNestFCS.CustomRecords</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

@@ -1,7 +1,7 @@
 using CSCore;
 using CSCore.Codecs;
 
-namespace IronNestFCS.CustomRecorder;
+namespace IronNestFCS.CustomRecords;
 
 /// <summary>
 /// 用 CSCore 把磁盘上的音频文件解码成交错(interleaved) float 样本数组。

@@ -2,7 +2,7 @@ using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace IronNestFCS.CustomRecorder;
+namespace IronNestFCS.CustomRecords;
 
 /// <summary>
 /// 把音频内嵌封面字节合成成唱片贴图：
