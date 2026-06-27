@@ -15,14 +15,14 @@ public class FcsSceneInteractor {
     private readonly ClickRaycaster clicks = new();
 
     // 当前选中的弹种（两管炮共享，由调度器决定任务派到哪管炮）。
-    public BulletType selectedBulletType = BulletType.HE;
+    public BulletType selectedBulletType = BulletType.AP;
 
     private List<GameObject> bulletTypeBtns = new();
 
     // 每个地图目标对应一个按钮：targetId -> 按钮。点击=用当前弹种为该目标入队一个任务。
     private readonly Dictionary<int, GameObject> targetButtons = new();
 
-    public bool AutoFire = false;
+    public bool AutoFire = true;
     public bool maxCharge = false;
 
     public FcsSceneInteractor(FSC fcs) {
@@ -46,7 +46,7 @@ public class FcsSceneInteractor {
                 foreach (var btn in bulletTypeBtns) {
                     SetColor(btn, btn == button ? Color.green : Color.white);
                 }
-            }, type == BulletType.HE ? Color.green : Color.white);
+            }, type == BulletType.AP ? Color.green : Color.white);
             button.transform.position = new Vector3(x, -0.6916f, z);
             button.transform.localScale = Vector3.one * 0.02f;
             bulletTypeBtns.Add(button);
@@ -122,6 +122,45 @@ public class FcsSceneInteractor {
 
     /// <summary>任务完成回调</summary>
     public void TaskFinished(ArtilleryTask task) {
+    }
+
+    /// <summary>键盘快捷键触发射击目标（对应小键盘 1-4），等价于点击 T1-T4 按钮。</summary>
+    public void FireTarget(int targetId) {
+        if (!targetButtons.TryGetValue(targetId, out var button)) return;
+        if (!button.GetComponent<Collider>().enabled) return;
+        var task = fcs.MapTable.GetMarkTarget(targetId);
+        if (task == null) return;
+        task.targetId = targetId;
+        task.bulletType = selectedBulletType;
+        fcs.EnqueueTask(task);
+        SetColor(button, Color.gray);
+        button.GetComponent<Collider>().enabled = false;
+        MelonCoroutines.Start(InvokeDelay(() => {
+            SetColor(button, Color.red);
+            button.GetComponent<Collider>().enabled = true;
+        }, 1f));
+    }
+
+    public void FireAtWorldPos(int id, Vector3 worldPos)
+    {
+        var turret = fcs.MapTable.turret;
+        if (turret == null) return;
+        var mapSurface = GameObject.Find("Draggable Surface")?.transform;
+        if (mapSurface == null) return;
+        var localPos = mapSurface.InverseTransformPoint(worldPos);
+        var target = localPos - turret.localPosition;
+        var dist = target.magnitude * 3.8164f;
+        var angle = Vector3.SignedAngle(target, Vector3.up, Vector3.forward);
+        if (angle < 0) angle += 360;
+        var task = new ArtilleryTask
+        {
+            targetId = id,
+            angel = angle,
+            distance = dist,
+            position = localPos * 3.8164f + new Vector3(10.016f, 5.235f, 0f),
+            bulletType = selectedBulletType
+        };
+        fcs.EnqueueTask(task);
     }
     
     public void Update() {

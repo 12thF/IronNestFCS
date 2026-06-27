@@ -10,6 +10,7 @@ public class MapTable {
     public Dictionary<int, Transform> artilleries;
     public Transform? fireMissionRoot;
     public FireMission? FireMission;
+    private Transform? mapSurface;
     
     public bool TryBind() {
         artilleries = new Dictionary<int, Transform>();
@@ -26,6 +27,7 @@ public class MapTable {
         }
 
         turret = turretObject.transform;
+        mapSurface = mapObject.transform;
         var map = mapObject.transform;
         for (var i = 0; i < map.childCount; ++i) {
             var t = map.GetChild(i);
@@ -45,6 +47,35 @@ public class MapTable {
         fireMissionRoot = fireMissionObject.transform;
         FireMission = fireMissionRoot.GetComponent<FireMission>();
         return FireMission != null;
+    }
+
+    public void SetMarkerWorldPos(int index, Vector3 worldPos)
+    {
+        if (!artilleries.TryGetValue(index, out var marker)) return;
+        if (mapSurface == null) return;
+        var local = mapSurface.InverseTransformPoint(worldPos);
+        local.z = marker.localPosition.z;
+        marker.localPosition = local;
+    }
+
+    public void ResetMarker(int index)
+    {
+        if (!artilleries.TryGetValue(index, out var marker)) return;
+        if (turret == null) return;
+        marker.localPosition = turret.localPosition;
+    }
+
+    public void SetMarkerByKmPos(int index, Vector2 kmPos)
+    {
+        if (!artilleries.TryGetValue(index, out var marker)) return;
+        var local = new Vector3(kmPos.x / 3.8164f, kmPos.y / 3.8164f, marker.localPosition.z);
+        marker.localPosition = local;
+    }
+
+    public void SetMarkerLocalPos(int index, Vector2 localPos)
+    {
+        if (!artilleries.TryGetValue(index, out var marker)) return;
+        marker.localPosition = new Vector3(localPos.x, localPos.y, marker.localPosition.z);
     }
 
     public ArtilleryTask? GetMarkTarget(int index) {

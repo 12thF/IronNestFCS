@@ -99,6 +99,16 @@ public class FSC
     public void Update() {
         _sceneInteractor.Update();
     }
+
+    /// <summary>键盘快捷键触发射击目标（小键盘 1-4）。</summary>
+    public void FireTarget(int targetId) {
+        _sceneInteractor.FireTarget(targetId);
+    }
+
+    /// <summary>扫荡：将目标位置加入打击队列。</summary>
+    public void FireAtWorldPos(int id, Vector3 worldPos) {
+        _sceneInteractor.FireAtWorldPos(id, worldPos);
+    }
     
     /// <summary>释放：撤销补丁、清空 IL2CPP 引用。</summary>
     public void Dispose()

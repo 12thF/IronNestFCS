@@ -173,6 +173,9 @@ public class GunSystem {
     }
 
     public IEnumerator WaitFire() {
+        while (gunController.pendingReload) {
+            yield return new WaitForSeconds(0.1f);
+        }
         while (!gunController.pendingReload) {
             yield return new WaitForSeconds(0.1f);
         }

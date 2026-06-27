@@ -1,5 +1,6 @@
 using IronNestFCS.Abstractions;
 using IronNestFCS.Logic.FCS;
+using UnityEngine.InputSystem;
 
 namespace IronNestFCS.Logic;
 
@@ -12,30 +13,56 @@ public class FcsModule : IFcsModule
 {
     private readonly FSC fcs = new();
     private FcsWindow? window;
+    private TacticalRadar? radar;
 
     public bool Initialize()
     {
         window = new FcsWindow(fcs);
+        radar = new TacticalRadar(fcs);
         bool bound = fcs.TryBind();
-        // 返回绑定结果仅用于 Host 日志；窗口实例已建好，未绑定时会显示提示，
-        // 进入场景后按 F9 重载即可绑定。
         return bound;
     }
 
     public void Update()
     {
         fcs.Update();
-        // 高频火控逻辑入口：读炮塔/目标状态、算弹道等。后续在 FSC 上加方法并在此调用。
+        radar?.Update();
+
+        var kb = Keyboard.current;
+        if (kb == null || !fcs.IsBound)
+            return;
+
+        if (kb.numpad0Key.wasPressedThisFrame)
+        {
+            SweepAllHostiles();
+            return;
+        }
+        if (kb.numpad1Key.wasPressedThisFrame) fcs.FireTarget(1);
+        else if (kb.numpad2Key.wasPressedThisFrame) fcs.FireTarget(2);
+        else if (kb.numpad3Key.wasPressedThisFrame) fcs.FireTarget(3);
+        else if (kb.numpad4Key.wasPressedThisFrame) fcs.FireTarget(4);
+    }
+
+    private void SweepAllHostiles()
+    {
+        var alive = radar?.AliveUnits;
+        if (alive == null || alive.Count == 0) return;
+        for (int i = 0; i < alive.Count; i++)
+        {
+            fcs.FireAtWorldPos(i + 1, alive[i].WorldPos);
+        }
     }
 
     public void OnGui()
     {
         window?.OnGui();
+        radar?.OnGui();
     }
 
     public void Shutdown()
     {
         fcs.Dispose();
         window = null;
+        radar = null;
     }
 }
