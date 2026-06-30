@@ -6,6 +6,7 @@ public enum Progress {
     Pending,
     Calculating,
     SelectingBullet,
+    DumpingWrongShell,
     LoadingBullet,
     LoadingPowder,
     WaitLoading,

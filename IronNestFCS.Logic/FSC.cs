@@ -266,10 +266,37 @@ public class FSC
         
         var powderCount = _sceneInteractor.maxCharge ? 6 : BallisticCalculator.MinimumCharge(task.distance);
 
-        // ===== 检查炮管当前状态：已有正确弹种+装药则跳过装填 =====
+        // ===== 检查炮管当前状态：膛内弹种不对则先原地 dump 清膛 =====
         string? chambered = gunSys.BulletInChamber();
+
+        if (gunSys.CanFire() && chambered != null && chambered != task.bulletType.ToString())
+        {
+            MelonLogger.Msg($"[FCS] {leftRight}: dumping wrong shell {chambered} (need {task.bulletType})");
+            task.progress = Progress.DumpingWrongShell;
+            MarkProgress(leftRight, Progress.DumpingWrongShell);
+
+            yield return _deskLock.Acquire();
+            try {
+                yield return BallisticCalculator.SetDistance(1f);
+                yield return BallisticCalculator.SetCharge(1);
+                yield return BallisticCalculator.SetShellType(task.bulletType);
+                yield return BallisticCalculator.Calculate();
+                yield return TriggerConsole.ConfirmTask();
+                yield return TriggerConsole.ConfirmBullet();
+                yield return TriggerConsole.ConfirmRotation();
+                yield return TriggerConsole.ConfirmElevation();
+                yield return TriggerConsole.ReadyToFire();
+                yield return TriggerConsole.Arm(leftRight);
+            } finally { _deskLock.Release(); }
+
+            if (_sceneInteractor.AutoFire) TriggerConsole.Fire();
+            yield return gunSys.WaitFire();
+            yield return gunSys.WaitBackToIdle();
+        }
+
+        // dump 后重新判断：reload 可能已自动装填好正确弹种
         bool alreadyLoaded = gunSys.CanFire()
-            && chambered == task.bulletType.ToString()
+            && gunSys.BulletInChamber() == task.bulletType.ToString()
             && gunSys.RemainingCharges() >= powderCount;
 
         // ===== 临界区 1：解算（无论如何都要算仰角）=====
