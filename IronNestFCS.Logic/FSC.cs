@@ -67,7 +67,7 @@ public class FSC
     private readonly CoroutineLock _turretLock = new();
 
     // 正在运行的协程句柄。Dispose 时全部停掉，避免热重载后旧 ALC 的协程继续执行导致崩溃。
-    private readonly List<object> _runningCoroutines = new();
+    private readonly List<(object handle, LeftRight gun)> _runningCoroutines = new();
     public FSC() {
         this._sceneInteractor = new FcsSceneInteractor(this);
     }
@@ -109,12 +109,43 @@ public class FSC
     public void FireAtWorldPos(int id, Vector3 worldPos) {
         _sceneInteractor.FireAtWorldPos(id, worldPos);
     }
+
+    /// <summary>扫荡插队：目标加入队列最前面。</summary>
+    public void FireAtWorldPosFront(int id, Vector3 worldPos) {
+        _sceneInteractor.FireAtWorldPosFront(id, worldPos);
+    }
+    
+    /// <summary>强制重置指定炮管：停协程、放锁、已中止任务放回队首重试。</summary>
+    public void AbortGun(LeftRight gun) {
+        MelonLogger.Msg($"[FCS] AbortGun {gun}");
+        // 保存被中止的任务，稍后重新入队
+        var abortedTask = gun == LeftRight.Left ? LeftTask : RightTask;
+        // 停掉该炮管的所有协程
+        for (int i = _runningCoroutines.Count - 1; i >= 0; i--) {
+            if (_runningCoroutines[i].gun != gun) continue;
+            try { MelonCoroutines.Stop(_runningCoroutines[i].handle); }
+            catch (Exception ex) { MelonLogger.Error($"[FCS] Abort stop failed: {ex}"); }
+            _runningCoroutines.RemoveAt(i);
+        }
+        // 强制释放所有锁
+        _deskLock.Reset();
+        _turretLock.Reset();
+        // 清空槽位
+        if (gun == LeftRight.Left) LeftTask = null;
+        else RightTask = null;
+        // 被中止的任务放回队首
+        if (abortedTask != null) {
+            EnqueueTaskFront(abortedTask);
+        } else {
+            TryDispatch();
+        }
+    }
     
     /// <summary>释放：撤销补丁、清空 IL2CPP 引用。</summary>
     public void Dispose()
     {
         // 停掉所有未完成的协程，否则热重载后旧 ALC 的协程仍会被 Unity 驱动 → 崩溃。
-        foreach (var handle in _runningCoroutines) {
+        foreach (var (handle, _) in _runningCoroutines) {
             try { MelonCoroutines.Stop(handle); }
             catch (Exception ex) { MelonLogger.Error($"[FCS] Stop coroutines failed: {ex}"); }
         }
@@ -152,6 +183,16 @@ public class FSC
         TryDispatch();
     }
 
+    /// <summary>插队到队列最前面（炮兵优先）。</summary>
+    public void EnqueueTaskFront(ArtilleryTask task) {
+        task.progress = Progress.Pending;
+        var existing = _taskQueue.ToArray();
+        _taskQueue.Clear();
+        _taskQueue.Enqueue(task);
+        foreach (var t in existing) _taskQueue.Enqueue(t);
+        TryDispatch();
+    }
+
     /// <summary>把队首任务派给空闲炮管，直到没有空闲炮管或队列空。</summary>
     private void TryDispatch() {
         while (_taskQueue.Count > 0) {
@@ -175,7 +216,7 @@ public class FSC
     /// </summary>
     private void StartTaskRoutine(LeftRight leftRight, ArtilleryTask task) {
         var handle = MelonCoroutines.Start(RunTaskRoutine(leftRight, task));
-        _runningCoroutines.Add(handle);
+        _runningCoroutines.Add((handle, leftRight));
     }
 
     /// <summary>炮管打完一发后释放槽位并尝试拉取队列里的下一个任务。</summary>
@@ -189,20 +230,19 @@ public class FSC
         var gunSys = leftRight == LeftRight.Left ? LeftGun : RightGun;
 
         // ===== 炮塔预约：任务一开始就在后台抢方向角并转向 =====
-        // 方向旋转和装填/升仰角互不冲突。后台协程阻塞式抢炮塔锁（"一旦释放就立即获取"），
-        // 一拿到就开始转向，与本任务接下来的整个装填+升仰角段重叠。等到击发前只需确认它转好，
-        // 而不必等仰角转完再从头抢炮塔、再转向。方向角必须独占到这一发打出去为止，
-        // 故锁一直持有到击发完成（WaitFire 后由 ReleaseOnce 归还）。
         var turret = new TurretReservation();
-        // 独立的 fire-and-forget 协程，必须登记以便 Dispose 时一并 Stop，
-        // 否则热重载后旧 ALC 的它仍被 Unity 驱动 → 崩溃。
-        _runningCoroutines.Add(MelonCoroutines.Start(ReserveTurretAndRotate(task, turret)));
+        _runningCoroutines.Add((MelonCoroutines.Start(ReserveTurretAndRotate(task, turret)), leftRight));
         
         var powderCount = _sceneInteractor.maxCharge ? 6 : BallisticCalculator.MinimumCharge(task.distance);
 
-        // ===== 临界区 1：解算 =====
-        // 弹道计算器 / 确认台 / 采购台都是全局唯一硬件，必须串行。算完仰角即放，
-        // 让另一管炮能立刻进来算它自己的弹道，与本管炮接下来的长装填段重叠。
+        // ===== 检查炮管当前状态：已有正确弹种+装药则跳过装填 =====
+        string? chambered = gunSys.BulletInChamber();
+        bool alreadyLoaded = gunSys.CanFire()
+            && chambered == task.bulletType.ToString()
+            && gunSys.RemainingCharges() >= powderCount;
+        MelonLogger.Msg($"[RunTask] {leftRight}: alreadyLoaded={alreadyLoaded} chamber={chambered} target={task.bulletType} canFire={gunSys.CanFire()} charges={gunSys.RemainingCharges()}/{powderCount}");
+
+        // ===== 临界区 1：解算（无论如何都要算仰角）=====
         float elevation = 0f;
         bool viable = true;
         yield return _deskLock.Acquire();
@@ -220,7 +260,6 @@ public class FSC
             }
 
             task.progress = Progress.SelectingBullet;
-            // 弹仓里没有目标弹种则采购（采购台也是共享硬件，放在锁内）。
             if (!gunSys.HaveBulletInCylinder(task.bulletType)) {
                 if (!gunSys.HaveEmptyShellInCylinder()) {
                     task.progress = Progress.Failed;
@@ -236,34 +275,30 @@ public class FSC
         }
 
         if (!viable) {
-            // 任务不可行：取消炮塔预约并归还（后台若尚未抢到，会在抢到后自行归还），
-            // 并释放炮管槽位让队列里的下一个任务能用这管炮。
             turret.Canceled = true;
             ReleaseTurretOnce(turret);
             ReleaseSlot(leftRight);
             yield break;
         }
 
-        // ===== 锁外：装填（每管炮独立，最耗时段，可与另一管炮全程并行）=====
-        task.progress = Progress.LoadingBullet;
-        yield return gunSys.LoadBullet(task.bulletType);
-        
-        
-        task.progress = Progress.LoadingPowder;
-        yield return gunSys.LoadPowder(powderCount);
-        task.progress = Progress.WaitLoading;
-        while (!gunSys.CanFire()) {
-            yield return new WaitForSeconds(1f);
+        // ===== 锁外：装填（炮管已就绪则跳过）=====
+        if (!alreadyLoaded) {
+            task.progress = Progress.LoadingBullet;
+            yield return gunSys.LoadBullet(task.bulletType);
+            
+            task.progress = Progress.LoadingPowder;
+            yield return gunSys.LoadPowder(powderCount);
+            task.progress = Progress.WaitLoading;
+            while (!gunSys.CanFire()) {
+                yield return new WaitForSeconds(1f);
+            }
         }
 
-        // ===== 锁外：升仰角（每管炮独立，最耗时段之一）=====
-        // 仰角杆是本管炮专属，不碰共享硬件；此时后台多半已把方向角转好。
+        // ===== 锁外：升仰角 =====
         task.progress = Progress.Aiming;
         yield return gunSys.SetElevation(elevation);
 
         // ===== 临界区 2：击发 =====
-        // 此处不再现抢炮塔——炮塔早已由后台预约持有。只等它转到位（通常已就绪，瞬间通过），
-        // 然后确认+击发。炮塔锁一直由本任务持有，直到击发完成才归还。
         task.progress = Progress.WaitingForFire;
         while (!turret.Ready) {
             yield return null;
@@ -284,12 +319,11 @@ public class FSC
             ReleaseTurretOnce(turret);
         }
 
-        // ===== 锁外：回位（仰角回 0，每管炮独立，最耗时段之一）=====
+        // ===== 锁外：回位 =====
         task.progress = Progress.BackToIdle;
         yield return gunSys.WaitBackToIdle();
         task.progress = Progress.Finished;
         _sceneInteractor.TaskFinished(task);
-        // 释放炮管槽位，自动拉取队列里的下一个任务。
         ReleaseSlot(leftRight);
     }
 

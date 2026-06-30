@@ -20,6 +20,9 @@ public class FcsWindow
     private static readonly Color ClrGreen = new(0.18f, 0.62f, 0.35f);
     private static readonly Color ClrWhite = Color.white;
     private static readonly Color ClrDiv = new(0.33f, 0.22f, 0.14f);
+    private static readonly Color ClrSweep = new(0.96f, 0.35f, 0.14f);
+
+    public bool AutoSweepEnabled { get; set; }
 
     public FcsWindow(FSC fcs) => this.fcs = fcs;
 
@@ -51,6 +54,14 @@ public class FcsWindow
         GUI.Label(new Rect(x, y, w, h), "IronNest FCS");
         GUI.color = oldColor;
         y += lineH;
+
+        if (AutoSweepEnabled)
+        {
+            GUI.color = ClrSweep;
+            GUI.Label(new Rect(x, y, w, h), "[Sweep ON]");
+            GUI.color = oldColor;
+            y += lineH;
+        }
 
         DrawDivider(x, y, w);
         y += 4f;

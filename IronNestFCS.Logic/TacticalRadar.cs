@@ -23,6 +23,8 @@ public class TacticalRadar
     private bool showRadar = true;
     private Rect radarRect = new(0, 0, 0, 0);
 
+    public bool AutoPlaceMarkers { get; set; } = true;
+
     private readonly List<UnitEntry> units = new();
     private float lastScanTime;
     private const float ScanInterval = 3f;
@@ -127,12 +129,15 @@ public class TacticalRadar
             Vector2 km = GetEntityKmPos(alive[i]);
             Log($"[Radar] Marker {i + 1} -> {alive[i].Name} km=({km.x:F2},{km.y:F2})");
         }
-        for (int i = 1; i <= 4; i++)
+        if (AutoPlaceMarkers)
         {
-            if (i <= alive.Count)
-                fcs.MapTable.SetMarkerWorldPos(i, alive[i - 1].WorldPos);
-            else
-                fcs.MapTable.ResetMarker(i);
+            for (int i = 1; i <= 4; i++)
+            {
+                if (i <= alive.Count)
+                    fcs.MapTable.SetMarkerWorldPos(i, alive[i - 1].WorldPos);
+                else
+                    fcs.MapTable.ResetMarker(i);
+            }
         }
 
         FlushLog();
@@ -160,7 +165,7 @@ public class TacticalRadar
 
         var oldColor = GUI.color;
         GUI.color = ClrTitle;
-        GUI.Label(new Rect(x, y, w, h), $"Targets ({aliveUnits.Count} alive)");
+        GUI.Label(new Rect(x, y, w, h), $"Targets ({aliveUnits.Count} alive) [{(AutoPlaceMarkers ? "Auto" : "Manual")}]");
         GUI.color = oldColor;
         y += lineH + 2f;
 
@@ -467,9 +472,23 @@ public class TacticalRadar
         }
         catch (Exception ex) { MelonLogger.Warning($"[Radar] IsHostile err {name}: {ex.Message}"); }
 
-        // 最后的兜底：名字关键词
+        // Entity/Icon 都无结果时，用 DB 数据做名字二次判断
         var nameLower = name.ToLower();
-        if (nameLower.Contains("enemy") || nameLower.Contains("hostile"))
+        if (nameLower.Contains("police") || nameLower.Contains("prop")
+            || nameLower.Contains("civ") || nameLower.Contains("smoke")
+            || nameLower.Contains("reference") || nameLower.Contains("ref"))
+        {
+            Log($"[Radar] {name} -> neutral/civilian by name");
+            return false;
+        }
+        if (nameLower.Contains("hospital") && !nameLower.Contains("ally"))
+        {
+            Log($"[Radar] {name} -> neutral hospital by name");
+            return false;
+        }
+        if (nameLower.Contains("enemy") || nameLower.Contains("hostile")
+            || nameLower.Contains("artillery") || nameLower.Contains("fdc")
+            || nameLower.Contains("target"))
         {
             Log($"[Radar] {name} -> hostile by name");
             return true;

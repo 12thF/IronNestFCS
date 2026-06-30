@@ -162,6 +162,28 @@ public class FcsSceneInteractor {
         };
         fcs.EnqueueTask(task);
     }
+
+    public void FireAtWorldPosFront(int id, Vector3 worldPos)
+    {
+        var turret = fcs.MapTable.turret;
+        if (turret == null) return;
+        var mapSurface = GameObject.Find("Draggable Surface")?.transform;
+        if (mapSurface == null) return;
+        var localPos = mapSurface.InverseTransformPoint(worldPos);
+        var target = localPos - turret.localPosition;
+        var dist = target.magnitude * 3.8164f;
+        var angle = Vector3.SignedAngle(target, Vector3.up, Vector3.forward);
+        if (angle < 0) angle += 360;
+        var task = new ArtilleryTask
+        {
+            targetId = id,
+            angel = angle,
+            distance = dist,
+            position = localPos * 3.8164f + new Vector3(10.016f, 5.235f, 0f),
+            bulletType = selectedBulletType
+        };
+        fcs.EnqueueTaskFront(task);
+    }
     
     public void Update() {
         clicks.Update();
@@ -245,7 +267,13 @@ public class FcsSceneInteractor {
             MelonLogger.Error("[FCS] WaitAndClick: button is null");
             yield break;
         }
+        float timeout = 0f;
         while (button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) {
+            timeout += 0.1f;
+            if (timeout > 10f) {
+                MelonLogger.Error($"[FCS] WaitAndClick: timeout after {timeout}s, active={button.isActive} cooldown={button.nextAllowedClickTime - Time.realtimeSinceStartup:F2}");
+                yield break;
+            }
             yield return new WaitForSeconds(0.1f);
         }
         yield return new WaitForSeconds(0.1f);

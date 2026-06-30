@@ -146,13 +146,26 @@ public class GunSystem {
 
     private IEnumerator SelectPowder(int count) {
         for (var i = 0; i < count; i++) {
-            yield return FcsSceneInteractor.WaitAndClick(powderButtons[i]!);
+            if (i >= powderButtons.Count) {
+                MelonLogger.Error($"[GunSystem] SelectPowder: out of range, i={i} count={count} buttons={powderButtons.Count}");
+                yield break;
+            }
+            var btn = powderButtons[i];
+            if (btn == null) {
+                MelonLogger.Error($"[GunSystem] SelectPowder: button {i} is null");
+                yield break;
+            }
+            MelonLogger.Msg($"[GunSystem] SelectPowder {i}/{count}, active={btn.isActive} cooldown={btn.nextAllowedClickTime-Time.realtimeSinceStartup}");
+            yield return FcsSceneInteractor.WaitAndClick(btn);
         }
     }
 
     public IEnumerator LoadPowder(int count) {
+        yield return new WaitForSeconds(0.5f);
         yield return SelectPowder(count);
+        MelonLogger.Msg($"[GunSystem] LoadPowder ramming, btn active={loadPowderButton?.isActive}");
         yield return FcsSceneInteractor.WaitAndClick(loadPowderButton!);
+        MelonLogger.Msg("[GunSystem] LoadPowder done");
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
@@ -173,9 +186,6 @@ public class GunSystem {
     }
 
     public IEnumerator WaitFire() {
-        while (gunController.pendingReload) {
-            yield return new WaitForSeconds(0.1f);
-        }
         while (!gunController.pendingReload) {
             yield return new WaitForSeconds(0.1f);
         }
