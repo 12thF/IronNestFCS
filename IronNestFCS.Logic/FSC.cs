@@ -68,6 +68,12 @@ public class FSC
 
     // 正在运行的协程句柄。Dispose 时全部停掉，避免热重载后旧 ALC 的协程继续执行导致崩溃。
     private readonly List<(object handle, LeftRight gun)> _runningCoroutines = new();
+    // 进度超时监控
+    private float _leftProgressTime;
+    private float _rightProgressTime;
+    private Progress _lastLeftProgress;
+    private Progress _lastRightProgress;
+    private const float ProgressTimeout = 20f;
     public FSC() {
         this._sceneInteractor = new FcsSceneInteractor(this);
     }
@@ -91,8 +97,7 @@ public class FSC
                   && Turret.TryBind()
                   && TriggerConsole.TryBind();
         MelonLogger.Msg("[FCS] Initialize: " + (IsBound ? "success" : "failed"));
-        // _runningCoroutines.Add(MelonCoroutines.Start(ExposeAllEntities()));
-        
+        _runningCoroutines.Add((MelonCoroutines.Start(ProgressTimeoutMonitor()), LeftRight.Left)); // 监控用左槽位无关
         return IsBound;
     }
 
@@ -141,6 +146,31 @@ public class FSC
         }
     }
     
+    /// <summary>记录进度更新时间戳</summary>
+    private void MarkProgress(LeftRight gun, Progress p) {
+        var now = Time.time;
+        if (gun == LeftRight.Left) { _leftProgressTime = now; _lastLeftProgress = p; }
+        else { _rightProgressTime = now; _lastRightProgress = p; }
+    }
+
+    /// <summary>监控协程：某炮管卡在同一状态超 20 秒则自动重置</summary>
+    private IEnumerator ProgressTimeoutMonitor() {
+        while (true) {
+            yield return new WaitForSeconds(2f);
+            var now = Time.time;
+            if (LeftTask != null && _leftProgressTime > 0 && now - _leftProgressTime > ProgressTimeout) {
+                MelonLogger.Msg($"[FCS] Timeout {_lastLeftProgress}, auto-abort Left");
+                AbortGun(LeftRight.Left);
+                _leftProgressTime = 0;
+            }
+            if (RightTask != null && _rightProgressTime > 0 && now - _rightProgressTime > ProgressTimeout) {
+                MelonLogger.Msg($"[FCS] Timeout {_lastRightProgress}, auto-abort Right");
+                AbortGun(LeftRight.Right);
+                _rightProgressTime = 0;
+            }
+        }
+    }
+
     /// <summary>释放：撤销补丁、清空 IL2CPP 引用。</summary>
     public void Dispose()
     {
@@ -228,6 +258,7 @@ public class FSC
 
     private IEnumerator RunTaskRoutine(LeftRight leftRight, ArtilleryTask task) {
         var gunSys = leftRight == LeftRight.Left ? LeftGun : RightGun;
+        MarkProgress(leftRight, task.progress);
 
         // ===== 炮塔预约：任务一开始就在后台抢方向角并转向 =====
         var turret = new TurretReservation();
@@ -240,7 +271,6 @@ public class FSC
         bool alreadyLoaded = gunSys.CanFire()
             && chambered == task.bulletType.ToString()
             && gunSys.RemainingCharges() >= powderCount;
-        MelonLogger.Msg($"[RunTask] {leftRight}: alreadyLoaded={alreadyLoaded} chamber={chambered} target={task.bulletType} canFire={gunSys.CanFire()} charges={gunSys.RemainingCharges()}/{powderCount}");
 
         // ===== 临界区 1：解算（无论如何都要算仰角）=====
         float elevation = 0f;
@@ -248,6 +278,7 @@ public class FSC
         yield return _deskLock.Acquire();
         try {
             task.progress = Progress.Calculating;
+            MarkProgress(leftRight, Progress.Calculating);
             yield return BallisticCalculator.SetDistance(task.distance);
             yield return BallisticCalculator.SetDirection(task.angel);
             yield return BallisticCalculator.SetCharge(powderCount);
@@ -270,9 +301,11 @@ public class FSC
             }
 
             task.progress = Progress.SelectingBullet;
+            MarkProgress(leftRight, Progress.SelectingBullet);
             if (!gunSys.HaveBulletInCylinder(task.bulletType)) {
                 if (!gunSys.HaveEmptyShellInCylinder()) {
                     task.progress = Progress.Failed;
+                    MarkProgress(leftRight, Progress.Failed);
                     viable = false;
                 }
                 else {
@@ -294,11 +327,14 @@ public class FSC
         // ===== 锁外：装填（炮管已就绪则跳过）=====
         if (!alreadyLoaded) {
             task.progress = Progress.LoadingBullet;
+            MarkProgress(leftRight, Progress.LoadingBullet);
             yield return gunSys.LoadBullet(task.bulletType);
             
             task.progress = Progress.LoadingPowder;
+            MarkProgress(leftRight, Progress.LoadingPowder);
             yield return gunSys.LoadPowder(powderCount);
             task.progress = Progress.WaitLoading;
+            MarkProgress(leftRight, Progress.WaitLoading);
             while (!gunSys.CanFire()) {
                 yield return new WaitForSeconds(1f);
             }
@@ -306,10 +342,12 @@ public class FSC
 
         // ===== 锁外：升仰角 =====
         task.progress = Progress.Aiming;
+        MarkProgress(leftRight, Progress.Aiming);
         yield return gunSys.SetElevation(elevation);
 
         // ===== 临界区 2：击发 =====
         task.progress = Progress.WaitingForFire;
+        MarkProgress(leftRight, Progress.WaitingForFire);
         while (!turret.Ready) {
             yield return null;
         }
@@ -331,8 +369,10 @@ public class FSC
 
         // ===== 锁外：回位 =====
         task.progress = Progress.BackToIdle;
+        MarkProgress(leftRight, Progress.BackToIdle);
         yield return gunSys.WaitBackToIdle();
         task.progress = Progress.Finished;
+        MarkProgress(leftRight, Progress.Finished);
         _sceneInteractor.TaskFinished(task);
         ReleaseSlot(leftRight);
     }

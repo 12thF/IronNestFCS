@@ -267,13 +267,8 @@ public class FcsSceneInteractor {
             MelonLogger.Error("[FCS] WaitAndClick: button is null");
             yield break;
         }
-        float timeout = 0f;
-        while (button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) {
-            timeout += 0.1f;
-            if (timeout > 10f) {
-                MelonLogger.Error($"[FCS] WaitAndClick: timeout after {timeout}s, active={button.isActive} cooldown={button.nextAllowedClickTime - Time.realtimeSinceStartup:F2}");
-                yield break;
-            }
+        // 只等冷却时间，不检查 isActive（药包按钮 isActive 不可靠但点击有效）
+        while (button.nextAllowedClickTime > Time.realtimeSinceStartup) {
             yield return new WaitForSeconds(0.1f);
         }
         yield return new WaitForSeconds(0.1f);

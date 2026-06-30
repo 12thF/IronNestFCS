@@ -82,7 +82,7 @@ public class FcsModule : IFcsModule
         else if (kb.numpad4Key.wasPressedThisFrame) fcs.FireTarget(4);
     }
 
-    /// <summary>返回优先值：4=炮兵/FDC 3=装甲高价值 2=Hostile/Target 1=其余</summary>
+    /// <summary>返回优先值：4=★≥3/FDC/火炮 3=★≥1/装甲 2=Hostile/Target 1=其余</summary>
     private static int GetPriority(EntityLocation? loc)
     {
         if (loc == null) return 1;
@@ -103,6 +103,15 @@ public class FcsModule : IFcsModule
                 else if (v is Enum e) roleVal = Convert.ToInt32(e);
             }
 
+            // Stars 威胁等级（高星目标优先）
+            int stars = 0;
+            var starsProp = entType.GetProperty("Stars", BindingFlags.Public | BindingFlags.Instance);
+            if (starsProp != null)
+            {
+                var sv = starsProp.GetValue(entity);
+                if (sv is int si) stars = si;
+            }
+
             // Icon 检查 FDC
             bool isFdc = false;
             var iconProp = entType.GetProperty("Icon", BindingFlags.Public | BindingFlags.Instance);
@@ -114,9 +123,13 @@ public class FcsModule : IFcsModule
 
             if (roleVal >= 0)
             {
+                if ((roleVal & RoleAlly) != 0) return 0;
+                // 高星目标 ⊂ P4
+                if (stars >= 3) return 4;
                 if (isFdc) return 4;
                 if ((roleVal & RoleArtillery) != 0) return 4;
-                if ((roleVal & RoleAlly) != 0) return 0;
+                // 1-2星或装甲 ⊂ P3
+                if (stars >= 1) return 3;
                 if ((roleVal & RoleEnemy) != 0 || (roleVal & RoleTarget) != 0)
                 {
                     bool armored = (roleVal & RoleFortification) != 0 || (roleVal & RoleTank) != 0;
