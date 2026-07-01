@@ -140,6 +140,7 @@ public class GunSystem {
             yield break;
         }
         yield return FcsSceneInteractor.WaitAndClick(loadBulletButton!);
+        yield return GameStateWatcher.WaitForReloadComplete(gunController);
     }
 
     private IEnumerator SelectPowder(int count) {
@@ -183,6 +184,7 @@ public class GunSystem {
         }
         yield return SelectPowder(count);
         yield return FcsSceneInteractor.WaitAndClick(loadPowderButton);
+        yield return GameStateWatcher.WaitForReloadComplete(gunController);
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
@@ -199,7 +201,7 @@ public class GunSystem {
         while (Mathf.Abs(gunController.CurrentElevationSpeed) > 0.01f) {
             yield return new WaitForSeconds(0.1f);
         }
-        yield return new WaitForSeconds(13);
+        yield return GameStateWatcher.WaitForReloadComplete(gunController, 20f);
     }
 
     public IEnumerator WaitFire() {

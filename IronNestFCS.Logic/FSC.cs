@@ -361,13 +361,13 @@ public class FSC
         }
 
         // ===== 锁外：升仰角 =====
-        task.progress = Progress.Aiming;
-        MarkProgress(leftRight, Progress.Aiming);
+        task.progress = Progress.SettingElevation;
+        MarkProgress(leftRight, Progress.SettingElevation);
         yield return gunSys.SetElevation(elevation);
 
         // ===== 临界区 2：击发 =====
-        task.progress = Progress.WaitingForFire;
-        MarkProgress(leftRight, Progress.WaitingForFire);
+        task.progress = Progress.PressingConfirm;
+        MarkProgress(leftRight, Progress.PressingConfirm);
         while (!turret.Ready) {
             yield return null;
         }
