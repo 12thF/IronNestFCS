@@ -160,12 +160,8 @@ public class GunSystem {
     public IEnumerator LoadPowder(int count) {
         yield return new WaitForSeconds(0.5f);
         yield return SelectPowder(count);
-        for (int attempt = 0; attempt < 3; attempt++) {
-            yield return FcsSceneInteractor.WaitAndClick(loadPowderButton!);
-            yield return new WaitForSeconds(1f);
-            if (gunController.CanFire) break;
-            MelonLogger.Msg($"[GunSystem] LoadPowder re-ram attempt {attempt + 2}/3");
-        }
+        yield return FcsSceneInteractor.WaitAndClickHold(loadPowderButton!, 1.5f);
+        yield return new WaitForSeconds(2f);
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
