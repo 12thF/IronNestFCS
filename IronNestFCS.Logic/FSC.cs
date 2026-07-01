@@ -266,38 +266,18 @@ public class FSC
         
         var powderCount = _sceneInteractor.maxCharge ? 6 : BallisticCalculator.MinimumCharge(task.distance);
 
-        // ===== 检查炮管当前状态：膛内弹种不对则先原地 dump 清膛 =====
+        // ===== 检查炮管当前状态：膛内弹种不对则跳过瞄准直接平射 dump =====
         string? chambered = gunSys.BulletInChamber();
+        bool isDump = chambered != null && chambered != task.bulletType.ToString();
 
-        if (gunSys.CanFire() && chambered != null && chambered != task.bulletType.ToString())
+        if (isDump)
         {
-            MelonLogger.Msg($"[FCS] {leftRight}: dumping wrong shell {chambered} (need {task.bulletType})");
+            MelonLogger.Msg($"[FCS] {leftRight}: dump {chambered}, need {task.bulletType}");
+            // 用最少装药减少浪费
+            powderCount = 1;
             task.progress = Progress.DumpingWrongShell;
             MarkProgress(leftRight, Progress.DumpingWrongShell);
-
-            yield return _deskLock.Acquire();
-            try {
-                yield return BallisticCalculator.SetDistance(1f);
-                yield return BallisticCalculator.SetCharge(1);
-                yield return BallisticCalculator.SetShellType(task.bulletType);
-                yield return BallisticCalculator.Calculate();
-                yield return TriggerConsole.ConfirmTask();
-                yield return TriggerConsole.ConfirmBullet();
-                yield return TriggerConsole.ConfirmRotation();
-                yield return TriggerConsole.ConfirmElevation();
-                yield return TriggerConsole.ReadyToFire();
-                yield return TriggerConsole.Arm(leftRight);
-            } finally { _deskLock.Release(); }
-
-            if (_sceneInteractor.AutoFire) TriggerConsole.Fire();
-            yield return gunSys.WaitFire();
-            yield return gunSys.WaitBackToIdle();
         }
-
-        // dump 后重新判断：reload 可能已自动装填好正确弹种
-        bool alreadyLoaded = gunSys.CanFire()
-            && gunSys.BulletInChamber() == task.bulletType.ToString()
-            && gunSys.RemainingCharges() >= powderCount;
 
         // ===== 临界区 1：解算（无论如何都要算仰角）=====
         float elevation = 0f;
@@ -357,12 +337,18 @@ public class FSC
             yield break;
         }
 
-        // ===== 锁外：装填（炮管已就绪则跳过）=====
-        if (!alreadyLoaded) {
-            task.progress = Progress.LoadingBullet;
-            MarkProgress(leftRight, Progress.LoadingBullet);
-            yield return gunSys.LoadBullet(task.bulletType);
-            
+        // ===== 锁外：装填 =====
+        bool skipLoading = gunSys.CanFire()
+            && gunSys.BulletInChamber() == task.bulletType.ToString()
+            && !isDump;
+
+        if (!skipLoading) {
+            if (chambered == null) {
+                task.progress = Progress.LoadingBullet;
+                MarkProgress(leftRight, Progress.LoadingBullet);
+                yield return gunSys.LoadBullet(task.bulletType);
+            }
+
             task.progress = Progress.LoadingPowder;
             MarkProgress(leftRight, Progress.LoadingPowder);
             yield return gunSys.LoadPowder(powderCount);
@@ -373,10 +359,12 @@ public class FSC
             }
         }
 
-        // ===== 锁外：升仰角 =====
-        task.progress = Progress.Aiming;
-        MarkProgress(leftRight, Progress.Aiming);
-        yield return gunSys.SetElevation(elevation);
+        // ===== 锁外：升仰角（dump 跳过）=====
+        if (!isDump) {
+            task.progress = Progress.Aiming;
+            MarkProgress(leftRight, Progress.Aiming);
+            yield return gunSys.SetElevation(elevation);
+        }
 
         // ===== 临界区 2：击发 =====
         task.progress = Progress.WaitingForFire;

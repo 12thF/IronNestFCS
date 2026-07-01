@@ -267,31 +267,12 @@ public class FcsSceneInteractor {
             MelonLogger.Error("[FCS] WaitAndClick: button is null");
             yield break;
         }
-        float waited = 0f;
-        while ((button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) && waited < 3f) {
+        while (button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) {
             yield return new WaitForSeconds(0.1f);
-            waited += 0.1f;
         }
         yield return new WaitForSeconds(0.1f);
         button.OnClickDown();
         yield return new WaitForSeconds(0.1f);
-        button.OnClickUp();
-    }
-
-    /// <summary>长握持点击（推药杆等需要持续按压的杠杆）</summary>
-    public static IEnumerator WaitAndClickHold(LookAtTarget? button, float holdTime = 1.5f) {
-        if (button == null) {
-            MelonLogger.Error("[FCS] WaitAndClickHold: button is null");
-            yield break;
-        }
-        float waited = 0f;
-        while ((button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) && waited < 3f) {
-            yield return new WaitForSeconds(0.1f);
-            waited += 0.1f;
-        }
-        yield return new WaitForSeconds(0.1f);
-        button.OnClickDown();
-        yield return new WaitForSeconds(holdTime);
         button.OnClickUp();
     }
     

@@ -106,11 +106,8 @@ public class GunSystem {
     }
 
     public void NextBullet() {
-        if (nextBulletButton == null) {
-            MelonLogger.Error($"[FCS] GunSystem {_surfix}: NextBulletButton unbound");
-        }
-        MelonLogger.Msg("[GunSystem] NextBullet");
-        nextBulletButton!.OnClickDown();
+        if (nextBulletButton == null) return;
+        nextBulletButton.OnClickDown();
     }
     
     /// <summary>
@@ -145,23 +142,45 @@ public class GunSystem {
 
     private IEnumerator SelectPowder(int count) {
         for (var i = 0; i < count; i++) {
-            if (i >= powderButtons.Count) {
-                MelonLogger.Error($"[GunSystem] SelectPowder: out of range, i={i} count={count}");
-                yield break;
-            }
-            if (powderButtons[i] == null) {
-                MelonLogger.Error($"[GunSystem] SelectPowder: button {i} is null");
-                yield break;
+            if (i >= powderButtons.Count || powderButtons[i] == null || powderButtons[i].gameObject == null) {
+                RefreshPowderButtons();
+                if (i >= powderButtons.Count || powderButtons[i] == null) {
+                    MelonLogger.Error($"[GunSystem] SelectPowder: button {i} invalid after refresh");
+                    yield break;
+                }
             }
             yield return FcsSceneInteractor.WaitAndClick(powderButtons[i]);
         }
     }
 
+    private void RefreshPowderButtons() {
+        powderButtons.Clear();
+        var gunSystem = GameObject.Find("Gun System " + _surfix)?.transform;
+        var reloadingConsole = gunSystem?.Find("--Reloading Console");
+        var powderController = reloadingConsole?.Find("PowderChargeController");
+        if (powderController == null) return;
+        for (var i = 0; i < powderController.childCount; ++i) {
+            var child = powderController.GetChild(i);
+            if (!child.name.StartsWith("Button Dispencer")) continue;
+            var button = child.GetComponent<LookAtTarget>();
+            if (button != null) powderButtons.Add(button);
+        }
+    }
+
     public IEnumerator LoadPowder(int count) {
-        yield return new WaitForSeconds(0.5f);
+        // 推药杆引用可能因 reload 重建而失效，重新绑定
+        if (loadPowderButton == null || loadPowderButton.gameObject == null) {
+            var gunSystem = GameObject.Find("Gun System " + _surfix)?.transform;
+            var reloadingConsole = gunSystem?.Find("--Reloading Console");
+            loadPowderButton = reloadingConsole?.FindChild("Universal Button Charge Rammer (1)")
+                ?.GetComponent<LookAtTarget>();
+            if (loadPowderButton == null) {
+                MelonLogger.Error($"[GunSystem] LoadPowder: rammer button missing");
+                yield break;
+            }
+        }
         yield return SelectPowder(count);
-        yield return FcsSceneInteractor.WaitAndClickHold(loadPowderButton!, 1.5f);
-        yield return new WaitForSeconds(2f);
+        yield return FcsSceneInteractor.WaitAndClick(loadPowderButton);
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
@@ -189,6 +208,30 @@ public class GunSystem {
     
     public int RemainingCharges() {
         return (int)remainingCharges.CurrentNumber;
+    }
+
+    /// <summary>炮管当前状态快照</summary>
+    public struct GunState {
+        public string? ChamberedShell;
+        public bool CanFire;
+        public bool PendingReload;
+        public float ElevationVelocity;
+        public float CurrentElevation;
+        public int ChargesRemaining;
+        public string[] CylinderBullets;
+    }
+
+    public GunState GetState() {
+        RefreshBullets();
+        return new GunState {
+            ChamberedShell = BulletInChamber(),
+            CanFire = gunController.CanFire,
+            PendingReload = gunController.pendingReload,
+            ElevationVelocity = gunController.elevationChangeVelocity,
+            CurrentElevation = gunController.CurrentElevation,
+            ChargesRemaining = RemainingCharges(),
+            CylinderBullets = bullets.Where(b => b != null).ToArray()!
+        };
     }
 
 }
