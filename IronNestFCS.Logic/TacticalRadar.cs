@@ -23,7 +23,19 @@ public class TacticalRadar
     private bool showRadar = true;
     private Rect radarRect = new(0, 0, 0, 0);
 
-    public bool AutoPlaceMarkers { get; set; } = true;
+    private bool autoPlaceMarkers = true;
+    public bool AutoPlaceMarkers
+    {
+        get => autoPlaceMarkers;
+        set
+        {
+            autoPlaceMarkers = value;
+            if (!autoPlaceMarkers)
+            {
+                fcs.MapTable.ClearMarkerLocations();
+            }
+        }
+    }
 
     private readonly List<UnitEntry> units = new();
     private float lastScanTime;
@@ -122,7 +134,7 @@ public class TacticalRadar
 
         Log($"[Radar] Total FireMission entities: {units.Count - nameMatchCount}  NameMatch entities: {nameMatchCount}  Total: {units.Count}");
 
-        var alive = units.Where(u => u.IsAlive).ToList();
+        var alive = SortByTargetPriority(units.Where(u => u.IsAlive));
         Log($"[Radar] Alive hostile count: {alive.Count}");
         for (int i = 0; i < Mathf.Min(alive.Count, 4); i++)
         {
@@ -134,10 +146,14 @@ public class TacticalRadar
             for (int i = 1; i <= 4; i++)
             {
                 if (i <= alive.Count)
-                    fcs.MapTable.SetMarkerWorldPos(i, alive[i - 1].WorldPos);
+                    fcs.MapTable.SetMarkerWorldPos(i, alive[i - 1].WorldPos, alive[i - 1].Location);
                 else
                     fcs.MapTable.ResetMarker(i);
             }
+        }
+        else
+        {
+            fcs.MapTable.ClearMarkerLocations();
         }
 
         FlushLog();
@@ -245,6 +261,14 @@ public class TacticalRadar
         _logLines.Add($"[{System.DateTime.Now:HH:mm:ss}] {msg}");
     }
 
+    private static List<UnitEntry> SortByTargetPriority(IEnumerable<UnitEntry> entries)
+    {
+        return entries
+            .OrderByDescending(u => TargetPriority.GetPriority(u.Location))
+            .ThenByDescending(u => TargetPriority.GetStars(u.Location))
+            .ToList();
+    }
+
     private static void FlushLog()
     {
         if (_logLines.Count == 0) return;
@@ -301,7 +325,7 @@ public class TacticalRadar
         return brief;
     }
 
-    private static bool IsUnitAlive(EntityLocation loc, GameObject go)
+    public static bool IsUnitAlive(EntityLocation loc, GameObject go)
     {
         if (!go.activeInHierarchy) return false;
 

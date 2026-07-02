@@ -44,26 +44,31 @@ public class BallisticCalculator {
     }
     
     public IEnumerator SetDistance(float distance) {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         distanceDial?.SetDialValue(distance);
         yield return new WaitForSeconds(0.5f);
     }
     
     public IEnumerator SetCharge(float charge) {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         chargeDial?.SetDialValue(charge);
         yield return new WaitForSeconds(0.5f);
     }
 
     public IEnumerator SetDirection(float angle) {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         directionDial?.SetDialValue(angle);
         yield return new WaitForSeconds(0.5f);
     }
 
     public IEnumerator SetShellType(BulletType type) {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         shellDial?.SetDialValue((float)type);
         yield return new WaitForSeconds(0.5f);
     }
 
     public IEnumerator Calculate() {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         calculateButton?.OnClickDown();
         yield return new WaitForSeconds(0.5f);
     }

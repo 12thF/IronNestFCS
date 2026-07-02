@@ -19,6 +19,7 @@ public class PurchaseDeck {
         var requisitionConsole = GameObject.Find("Requisition Console").transform;
         var cards = requisitionConsole.GetComponentsInChildren<PunchcardRuntime>();
         foreach (var card in cards) {
+            MelonLogger.Msg($"[FCS] PurchaseDeck: Found card {card.CurrentDefinition.ID}");
             switch (card.CurrentDefinition.ID) {
                 case "HEShell":
                     _heCard = card.transform;
@@ -67,10 +68,12 @@ public class PurchaseDeck {
             yield break;
         }
         var target = new Vector3(6.4814f, -2.4675f, -22.0968f);
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         card.position = target;
         card.GetComponent<DraggableItem>().MoveToSlot();
         yield return new WaitForSeconds(0.5f);
         
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         switch (leftRight) {
             case LeftRight.Left:
                 GetLeftRightDial().SetDialValue(0);
@@ -79,7 +82,7 @@ public class PurchaseDeck {
                 GetLeftRightDial().SetDialValue(1);
                 break;
         }
-        yield return FcsSceneInteractor.WaitAndClick(_buyButton);
+        yield return FcsSceneInteractor.WaitAndClick(_buyButton, label: $"BuyShell.{type}.{leftRight}");
         yield return new WaitForSeconds(2f);
     }
 
@@ -88,11 +91,12 @@ public class PurchaseDeck {
             MelonLogger.Error("[FCS] BuyPowders: Can't find PowderCharges card");
             yield break;
         }
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         _powderCard.position = new Vector3(6.4814f, -2.4675f, -22.0968f);
         _powderCard.GetComponent<DraggableItem>().MoveToSlot();
         // 与 BuyShell 一致：等卡牌入槽稳定后再点购买，避免点击早于入槽导致本次采购无效。
         yield return new WaitForSeconds(0.5f);
-        yield return FcsSceneInteractor.WaitAndClick(_buyButton);
+        yield return FcsSceneInteractor.WaitAndClick(_buyButton, label: "BuyPowders");
         yield return new WaitForSeconds(2f);
     }
     

@@ -141,7 +141,7 @@ public class FcsSceneInteractor {
         }, 1f));
     }
 
-    public void FireAtWorldPos(int id, Vector3 worldPos)
+    public void FireAtWorldPos(int id, Vector3 worldPos, EntityLocation? location = null)
     {
         var turret = fcs.MapTable.turret;
         if (turret == null) return;
@@ -158,12 +158,13 @@ public class FcsSceneInteractor {
             angel = angle,
             distance = dist,
             position = localPos * 3.8164f + new Vector3(10.016f, 5.235f, 0f),
+            location = location,
             bulletType = selectedBulletType
         };
         fcs.EnqueueTask(task);
     }
 
-    public void FireAtWorldPosFront(int id, Vector3 worldPos)
+    public void FireAtWorldPosFront(int id, Vector3 worldPos, EntityLocation? location = null)
     {
         var turret = fcs.MapTable.turret;
         if (turret == null) return;
@@ -180,6 +181,7 @@ public class FcsSceneInteractor {
             angel = angle,
             distance = dist,
             position = localPos * 3.8164f + new Vector3(10.016f, 5.235f, 0f),
+            location = location,
             bulletType = selectedBulletType
         };
         fcs.EnqueueTaskFront(task);
@@ -262,18 +264,39 @@ public class FcsSceneInteractor {
         return go;
     }
     
-    public static IEnumerator WaitAndClick(LookAtTarget? button) {
+    public static bool IsInteractive => Application.isFocused && Time.timeScale > 0f;
+
+    public static IEnumerator WaitUntilInteractive() {
+        while (!IsInteractive) {
+            yield return null;
+        }
+    }
+
+    public static IEnumerator WaitAndClick(LookAtTarget? button, bool waitActive = true, string label = "", float timeoutSeconds = 10f) {
         if (button == null) {
-            MelonLogger.Error("[FCS] WaitAndClick: button is null");
+            MelonLogger.Error($"[FCS] WaitAndClick: button is null. label={label}");
             yield break;
         }
-        float waited = 0f;
-        while ((button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup) && waited < 3f) {
-            yield return new WaitForSeconds(0.1f);
-            waited += 0.1f;
+        yield return WaitUntilInteractive();
+        var waited = 0f;
+        while ((waitActive && button.isActive == false || button.nextAllowedClickTime > Time.realtimeSinceStartup)
+               && waited < timeoutSeconds) {
+            if (!IsInteractive) {
+                yield return null;
+                continue;
+            }
+            yield return null;
+            waited += Time.deltaTime;
         }
+        if (waitActive && button.isActive == false) {
+            var name = button.gameObject?.name ?? "unknown";
+            MelonLogger.Error($"[FCS] WaitAndClick: button is not active after timeout. label={label}, object={name}");
+            yield break;
+        }
+        yield return WaitUntilInteractive();
         yield return new WaitForSeconds(0.1f);
         button.OnClickDown();
+        yield return WaitUntilInteractive();
         yield return new WaitForSeconds(0.1f);
         button.OnClickUp();
     }

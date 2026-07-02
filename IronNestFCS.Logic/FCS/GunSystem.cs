@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System;
 using Il2Cpp;
 using Il2CppTMPro;
 using MelonLoader;
@@ -28,8 +29,12 @@ public class GunSystem {
     private GunController? gunController;
     private LinearSliderInteractable? elevationLever;
     private OdometerDisplay? remainingCharges;
+    private OdometerDisplay? actualCharges;
 
     private TextMeshPro shellId;
+    public bool LastActionFailed { get; private set; }
+    public bool LastElevationReady { get; private set; }
+    public bool LastElevationInterrupted { get; private set; }
 
     public bool TryBind(string surfix) {
         this._surfix = surfix;
@@ -41,7 +46,12 @@ public class GunSystem {
             return false;
         }
 
-        remainingCharges = reloadingConsole.GetComponentInChildren<OdometerDisplay>();
+        var chargeDisplays = reloadingConsole.GetComponentsInChildren<OdometerDisplay>(true);
+        for (var i = 0; i < chargeDisplays.Length; i++) {
+            MelonLogger.Msg($"[FCS] GunSystem {surfix}: charge display {i} {chargeDisplays[i].gameObject.name}={chargeDisplays[i].CurrentNumber}");
+        }
+        remainingCharges = chargeDisplays.Length > 0 ? chargeDisplays[0] : null;
+        actualCharges = chargeDisplays.Length > 1 ? chargeDisplays[^1] : null;
         
         nextBulletButton = 
             reloadingConsole.Find("Universal Button Move Cylinder")
@@ -77,23 +87,47 @@ public class GunSystem {
     }
     
     public bool CanFire() {
-        return gunController != null && gunController.CanFire;
+        return gunController.CanFire;
     }
 
-    public IEnumerator SetElevation(float elevation) {
-        if (elevationLever == null) { yield break; }
+    public bool HasFired() {
+        return gunController.pendingReload;
+    }
+
+    public float CurrentElevation() {
+        return gunController.CurrentElevation;
+    }
+
+    public IEnumerator SetElevation(float elevation, Action? maintain = null) {
+        LastElevationReady = false;
+        LastElevationInterrupted = false;
+        if (Mathf.Abs(gunController.CurrentElevation - elevation) <= 0.15f) {
+            LastElevationReady = true;
+            yield break;
+        }
+        maintain?.Invoke();
         elevationLever.SetSliderValue(elevation);
         yield return new WaitForSeconds(0.1f);
-        float waited = 0f;
-        while (gunController != null && Mathf.Abs(gunController.ElevationErrorDeg) > 0.1f && waited < 30f) {
+        var waited = 0f;
+        while (Mathf.Abs(gunController.CurrentElevation - elevation) > 0.15f && waited < 8f) {
+            maintain?.Invoke();
+            if (!Application.isFocused || Time.timeScale <= 0f) {
+                LastElevationInterrupted = true;
+                yield return null;
+                continue;
+            }
             elevationLever.SetSliderValue(elevation);
-            yield return new WaitForSeconds(1f);
-            waited += 1f;
+            yield return new WaitForSeconds(0.2f);
+            waited += 0.2f;
+        }
+        LastElevationReady = Mathf.Abs(gunController.CurrentElevation - elevation) <= 0.15f;
+        if (!LastElevationReady) {
+            MelonLogger.Warning($"[FCS] GunSystem {_surfix}: SetElevation not exact. target={elevation:F2}, current={gunController.CurrentElevation:F2}");
         }
     }
     
     public string? BulletInChamber() {
-        return gunController?.ChamberedShellBlueprint?.shellDefinition?.ShellId?.ToUpper();
+        return gunController?.ChamberedShellBlueprint?.shellDefinition?.ShellId;
     }
     
     public bool IsChamberEmpty() {
@@ -104,19 +138,28 @@ public class GunSystem {
         bullets.Clear();
         if (shellSelector == null) return;
         foreach (var shell in shellSelector.bullets) {
-            bullets.Add(shell?.GetComponent<ShellBlueprint>()?.shellDefinition?.ShellId?.ToUpper());
+            bullets.Add(shell?.GetComponent<ShellBlueprint>()?.shellDefinition?.ShellId);
         }
+        MelonLogger.Msg($"[FCS] GunSystem {_surfix}: Cylinder bullets: {string.Join(", ", bullets)}");
     }
 
-    public void NextBullet() {
-        if (nextBulletButton == null) return;
-        nextBulletButton.OnClickDown();
+    public IEnumerator NextBullet() {
+        if (nextBulletButton == null) {
+            MelonLogger.Error($"[FCS] GunSystem {_surfix}: NextBulletButton unbound");
+            yield break;
+        }
+        MelonLogger.Msg("[GunSystem] NextBullet");
+        yield return FcsSceneInteractor.WaitAndClick(nextBulletButton, label: $"{_surfix}.NextBullet");
     }
     
+    /// <summary>
+    /// 装填指定弹种：先把弹仓转到目标弹，再按装填。转弹仓每步之间要等 1 秒
+    /// （游戏有转动动画/物理）。返回 IEnumerator，调用方用 yield return 等待它跑完。
+    /// 必须走协程而非 async：continuation 要留在主线程才能安全访问 IL2CPP 对象。
+    /// </summary>
     public IEnumerator LoadBullet(BulletType type) {
         RefreshBullets();
-        var typeStr = type.ToString().ToUpper();
-        var index = bullets.IndexOf(typeStr);
+        var index = bullets.IndexOf(type.ToString());
         if (index == -1) {
             MelonLogger.Error($"[FCS] GunSystem {_surfix}: " +
                               $"No {type} available in cylinder, current bullets: {string.Join(", ", bullets)}");
@@ -124,98 +167,217 @@ public class GunSystem {
         }
         
         for (var i = 0; i < bullets.Count; ++i) {
-            if (bullets[0] == typeStr) {
+            if (bullets[0] == type.ToString()) {
                 break;
             };
-            NextBullet();
+            yield return NextBullet();
             yield return new WaitForSeconds(1.5f);
             RefreshBullets();
         }
-        if (bullets[0] != typeStr) {
+        if (bullets[0] != type.ToString()) {
             MelonLogger.Error($"[FCS] GunSystem {_surfix}: Can't find {type} after rotation, " +
                               $"current: {string.Join(", ", bullets)}");
             yield break;
         }
-        yield return FcsSceneInteractor.WaitAndClick(loadBulletButton!);
-        if (gunController != null)
-            yield return GameStateWatcher.WaitForReloadComplete(gunController);
+        yield return FcsSceneInteractor.WaitAndClick(loadBulletButton!, label: $"{_surfix}.LoadBullet", timeoutSeconds: 45f);
     }
 
     private IEnumerator SelectPowder(int count) {
+        LastActionFailed = false;
+        if (count > 0 && powderButtons.Count > 0) {
+            yield return WaitPowderButtonReady(0, 45f);
+            if (LastActionFailed) yield break;
+        }
         for (var i = 0; i < count; i++) {
-            if (i >= powderButtons.Count || powderButtons[i] == null || powderButtons[i].gameObject == null) {
-                RefreshPowderButtons();
-                if (i >= powderButtons.Count || powderButtons[i] == null) {
-                    MelonLogger.Error($"[GunSystem] SelectPowder: button {i} invalid after refresh");
-                    yield break;
-                }
+            if (i >= powderButtons.Count) {
+                MelonLogger.Error($"[GunSystem] SelectPowder: out of range, i={i} count={count}");
+                yield break;
             }
-            yield return FcsSceneInteractor.WaitAndClick(powderButtons[i]);
+            if (powderButtons[i] == null) {
+                MelonLogger.Error($"[GunSystem] SelectPowder: button {i} is null");
+                LastActionFailed = true;
+                yield break;
+            }
+            if (!powderButtons[i].isActive) {
+                MelonLogger.Error($"[GunSystem] SelectPowder: button {i} is not active");
+                LastActionFailed = true;
+                yield break;
+            }
+            yield return FcsSceneInteractor.WaitAndClick(powderButtons[i], label: $"{_surfix}.SelectPowder[{i}]");
         }
     }
 
-    private void RefreshPowderButtons() {
-        powderButtons.Clear();
+    private IEnumerator WaitPowderButtonReady(int index, float timeoutSeconds) {
+        if (index >= powderButtons.Count || powderButtons[index] == null) yield break;
+        var waited = 0f;
+        while (!powderButtons[index].isActive && waited < timeoutSeconds) {
+            yield return new WaitForSeconds(0.5f);
+            if (Application.isFocused && Time.timeScale > 0f) {
+                waited += 0.5f;
+            }
+        }
+        if (!powderButtons[index].isActive) {
+            MelonLogger.Error($"[GunSystem] WaitPowderButtonReady timeout, index={index}");
+            LastActionFailed = true;
+        }
+    }
+
+    private IEnumerator WaitLoadPowderButtonReady(float timeoutSeconds) {
+        RefreshLoadPowderButtonIfInvalid();
+        if (loadPowderButton == null) {
+            MelonLogger.Error($"[GunSystem] WaitLoadPowderButtonReady: load powder button is null");
+            LastActionFailed = true;
+            yield break;
+        }
+        var waited = 0f;
+        while (!loadPowderButton.isActive && !CanFire() && waited < timeoutSeconds) {
+            RefreshLoadPowderButtonIfInvalid();
+            if (loadPowderButton == null) {
+                MelonLogger.Error($"[GunSystem] WaitLoadPowderButtonReady: load powder button lost during wait");
+                LastActionFailed = true;
+                yield break;
+            }
+            yield return new WaitForSeconds(0.5f);
+            if (Application.isFocused && Time.timeScale > 0f) {
+                waited += 0.5f;
+            }
+        }
+        if (CanFire()) {
+            MelonLogger.Msg($"[GunSystem] WaitLoadPowderButtonReady: gun already can fire");
+            yield break;
+        }
+        if (!loadPowderButton.isActive) {
+            MelonLogger.Error($"[GunSystem] WaitLoadPowderButtonReady timeout");
+            LastActionFailed = true;
+        }
+    }
+
+    private void RefreshLoadPowderButtonIfInvalid() {
+        if (loadPowderButton != null && loadPowderButton.gameObject != null) {
+            return;
+        }
         var gunSystem = GameObject.Find("Gun System " + _surfix)?.transform;
         var reloadingConsole = gunSystem?.Find("--Reloading Console");
-        var powderController = reloadingConsole?.Find("PowderChargeController");
-        if (powderController == null) return;
-        for (var i = 0; i < powderController.childCount; ++i) {
-            var child = powderController.GetChild(i);
-            if (!child.name.StartsWith("Button Dispencer")) continue;
-            var button = child.GetComponent<LookAtTarget>();
-            if (button != null) powderButtons.Add(button);
+        loadPowderButton = reloadingConsole?.FindChild("Universal Button Charge Rammer (1)")
+            ?.GetComponent<LookAtTarget>();
+        if (loadPowderButton == null) {
+            MelonLogger.Warning($"[GunSystem] RefreshLoadPowderButton: rammer button missing for {_surfix}");
         }
+        else {
+            MelonLogger.Msg($"[GunSystem] RefreshLoadPowderButton: rebound rammer button for {_surfix}");
+        }
+    }
+
+    public int SelectedPowderCount() {
+        var count = actualCharges != null ? (int)actualCharges.CurrentNumber : 0;
+        MelonLogger.Msg($"[FCS] GunSystem {_surfix}: actual powder display={count}");
+        return count;
     }
 
     public IEnumerator LoadPowder(int count) {
-        if (loadPowderButton == null || loadPowderButton.gameObject == null) {
-            var gunSystem = GameObject.Find("Gun System " + _surfix)?.transform;
-            var reloadingConsole = gunSystem?.Find("--Reloading Console");
-            loadPowderButton = reloadingConsole?.FindChild("Universal Button Charge Rammer (1)")
-                ?.GetComponent<LookAtTarget>();
-            if (loadPowderButton == null) {
-                MelonLogger.Error($"[GunSystem] LoadPowder: rammer button missing");
-                yield break;
-            }
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip load powder, gun already can fire");
+            yield break;
+        }
+        yield return new WaitForSeconds(0.5f);
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip select powder, gun already can fire");
+            yield break;
         }
         yield return SelectPowder(count);
-        yield return FcsSceneInteractor.WaitAndClick(loadPowderButton);
-        if (gunController != null)
-            yield return GameStateWatcher.WaitForReloadComplete(gunController);
+        if (LastActionFailed) yield break;
+        yield return new WaitForSeconds(0.5f);
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip push powder after select, gun already can fire");
+            yield break;
+        }
+        yield return PushPowder();
     }
 
-    /// <summary>直接退弹（不发射），失败则回退到旧 dump 方式</summary>
-    public IEnumerator EjectChamberedShell()
-    {
-        var gunSystem = GameObject.Find("Gun System " + _surfix)?.transform;
-        var rc = gunSystem?.GetComponentInChildren<ArtilleryReloadController>();
-        if (rc != null)
-        {
-            rc.EjectChamberedShell();
-            yield return new WaitForSeconds(1f);
-            if (gunController != null)
-                yield return GameStateWatcher.WaitForReloadComplete(gunController);
-        }
-        else
-        {
-            // fallback: 装 1 包药 → 平射清膛
-            MelonLogger.Msg($"[GunSystem] Eject not available, fallback to dump fire");
-            yield return LoadPowder(1);
-            while (!CanFire() && gunController != null) yield return new WaitForSeconds(1f);
-        }
+    public IEnumerator CompletePowderSelection(int targetCount) {
+        yield return CompletePowderSelectionFrom(SelectedPowderCount(), targetCount);
     }
 
-    /// <summary>直接击发（用 GunController.RequestFire 代替 spinner）</summary>
-    public void RequestFire()
-    {
-        if (gunController != null)
-            gunController.RequestFire();
+    public IEnumerator CompletePowderSelectionFrom(int currentCount, int targetCount) {
+        LastActionFailed = false;
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip complete powder, gun already can fire");
+            yield break;
+        }
+        if (currentCount >= targetCount) {
+            yield return PushPowder();
+            yield break;
+        }
+
+        for (var i = currentCount; i < targetCount; i++) {
+            if (CanFire()) {
+                MelonLogger.Msg($"[FCS] GunSystem {_surfix}: stop adding powder, gun already can fire");
+                yield break;
+            }
+            yield return WaitPowderButtonReady(i, 45f);
+            if (LastActionFailed) yield break;
+            if (i >= powderButtons.Count) {
+                MelonLogger.Error($"[GunSystem] CompletePowderSelection: out of range, i={i} target={targetCount}");
+                LastActionFailed = true;
+                yield break;
+            }
+            if (!powderButtons[i].isActive) {
+                MelonLogger.Error($"[GunSystem] CompletePowderSelection: button {i} is not active");
+                LastActionFailed = true;
+                yield break;
+            }
+            yield return FcsSceneInteractor.WaitAndClick(powderButtons[i], label: $"{_surfix}.AddPowder[{i}]");
+        }
+        yield return new WaitForSeconds(0.5f);
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip final push powder, gun already can fire");
+            yield break;
+        }
+        yield return PushPowder();
+    }
+
+    public IEnumerator PushPowder() {
+        LastActionFailed = false;
+        MelonLogger.Msg($"[FCS] GunSystem {_surfix}: push powder");
+        yield return WaitLoadPowderButtonReady(45f);
+        if (LastActionFailed) yield break;
+        if (CanFire()) {
+            MelonLogger.Msg($"[FCS] GunSystem {_surfix}: skip push powder, gun already can fire");
+            yield break;
+        }
+        yield return FcsSceneInteractor.WaitAndClick(loadPowderButton!, label: $"{_surfix}.LoadPowder", timeoutSeconds: 45f);
     }
 
     public bool HaveBulletInCylinder(BulletType type) {
         RefreshBullets();
-        return bullets.Contains(type.ToString().ToUpper());
+        return bullets.Contains(type.ToString());
+    }
+
+    public IEnumerator WaitUntilBulletInCylinder(BulletType type, float timeoutSeconds) {
+        var waited = 0f;
+        while (waited < timeoutSeconds) {
+            if (HaveBulletInCylinder(type)) {
+                yield break;
+            }
+            yield return new WaitForSeconds(0.25f);
+            if (Application.isFocused && Time.timeScale > 0f) {
+                waited += 0.25f;
+            }
+        }
+    }
+
+    public IEnumerator WaitUntilChambered(BulletType type, float timeoutSeconds) {
+        var expected = type.ToString();
+        var waited = 0f;
+        while (waited < timeoutSeconds) {
+            if (BulletInChamber() == expected) {
+                yield break;
+            }
+            yield return new WaitForSeconds(0.25f);
+            if (Application.isFocused && Time.timeScale > 0f) {
+                waited += 0.25f;
+            }
+        }
     }
     
     public bool HaveEmptyShellInCylinder() {
@@ -224,54 +386,39 @@ public class GunSystem {
     }
 
     public IEnumerator WaitBackToIdle() {
-        float waited = 0f;
-        while (gunController != null && Mathf.Abs(gunController.CurrentElevationSpeed) > 0.01f && waited < 30f) {
+        while (gunController.elevationChangeVelocity != 0) {
+            if (!Application.isFocused || Time.timeScale <= 0f) {
+                yield return null;
+                continue;
+            }
+            yield return new WaitForSeconds(0.1f);
+        }
+        var waited = 0f;
+        while (waited < 1.5f) {
+            if (!Application.isFocused || Time.timeScale <= 0f) {
+                yield return null;
+                continue;
+            }
             yield return new WaitForSeconds(0.1f);
             waited += 0.1f;
-        }
-        if (gunController != null) {
-            yield return GameStateWatcher.WaitForReloadComplete(gunController, 20f);
-            if (!gunController.ExternalReloadLoweringLocked) {
-                gunController.SetExternalReloadLoweringLocked(true);
-                yield return new WaitForSeconds(0.5f);
-            }
         }
     }
 
-    public IEnumerator WaitFire() {
-        float waited = 0f;
-        while (gunController != null && !gunController.IsReloading && waited < 30f) {
+    public IEnumerator WaitFire(float timeoutSeconds, Action<bool> done) {
+        var waited = 0f;
+        while (!gunController.pendingReload && waited < timeoutSeconds) {
+            if (!Application.isFocused || Time.timeScale <= 0f) {
+                yield return null;
+                continue;
+            }
             yield return new WaitForSeconds(0.1f);
             waited += 0.1f;
         }
+        done(gunController.pendingReload);
     }
     
     public int RemainingCharges() {
-        return remainingCharges != null ? (int)remainingCharges.CurrentNumber : 0;
-    }
-
-    /// <summary>炮管当前状态快照</summary>
-    public struct GunState {
-        public string? ChamberedShell;
-        public bool CanFire;
-        public bool PendingReload;
-        public float ElevationVelocity;
-        public float CurrentElevation;
-        public int ChargesRemaining;
-        public string[] CylinderBullets;
-    }
-
-    public GunState GetState() {
-        RefreshBullets();
-        return new GunState {
-            ChamberedShell = BulletInChamber(),
-            CanFire = CanFire(),
-            PendingReload = gunController != null && gunController.IsReloading,
-            ElevationVelocity = gunController != null ? gunController.CurrentElevationSpeed : 0f,
-            CurrentElevation = gunController != null ? gunController.CurrentElevation : 0f,
-            ChargesRemaining = RemainingCharges(),
-            CylinderBullets = bullets.Where(b => b != null).ToArray()!
-        };
+        return (int)remainingCharges.CurrentNumber;
     }
 
 }

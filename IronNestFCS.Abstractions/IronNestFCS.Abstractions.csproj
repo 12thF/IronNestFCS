@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <AssemblyName>IronNestFCS.Abstractions</AssemblyName>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <OutputPath>$(GameDir)\UserLibs\</OutputPath>
     </PropertyGroup>
 
 </Project>

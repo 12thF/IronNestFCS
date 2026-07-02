@@ -38,7 +38,9 @@ public class FcsWindow
         else extra += lineH;
         if (fcs.RightTask != null) extra += lineH * 3;
         else extra += lineH;
-        extra += lineH * (fcs.PendingCount + 1);
+        var queuePreview = fcs.QueueCan;
+        if (fcs.AutomaticFireHalted) extra += lineH * 2;
+        extra += lineH * (queuePreview.Count + 1);
         extra += 12f;
 
         panelRect.height = 140f + extra;
@@ -59,6 +61,17 @@ public class FcsWindow
         {
             GUI.color = ClrSweep;
             GUI.Label(new Rect(x, y, w, h), "[Sweep ON]");
+            GUI.color = oldColor;
+            y += lineH;
+        }
+
+        if (fcs.AutomaticFireHalted)
+        {
+            GUI.color = ClrFailed;
+            GUI.Label(new Rect(x, y, w, h), "[HALT] Auto fire stopped");
+            y += lineH;
+            GUI.color = ClrWarning;
+            GUI.Label(new Rect(x, y, w, h), fcs.AutomaticFireHaltReason ?? "Resource unavailable");
             GUI.color = oldColor;
             y += lineH;
         }
@@ -86,7 +99,7 @@ public class FcsWindow
         GUI.color = oldColor;
         y += lineH;
 
-        foreach (var item in fcs.QueueCan)
+        foreach (var item in queuePreview)
         {
             GUI.Label(new Rect(x, y, w, h),
                 $"  T{item.targetId}  {ConvertPosition(item.position)}  {item.angel,5:F1}°/{item.distance,5:F2}km  {item.bulletType}");

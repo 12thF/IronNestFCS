@@ -1,28 +1,19 @@
 ﻿using UnityEngine;
 
+using Il2Cpp;
+
 namespace IronNestFCS.Logic.FCS;
 
 public enum Progress {
     Pending,
-    Ranging,
     Calculating,
-    PurchasingAmmo,
     SelectingBullet,
     LoadingBullet,
-    WaitLoaderRetract,
-    SelectingCharge,
     LoadingPowder,
     WaitLoading,
-    WaitTrayRetract,
-    ClosingBreech,
-    LockingBreech,
-    SettingElevation,
-    SettingBearing,
-    PressingConfirm,
-    PressingLock,
-    PullingLever,
-    ConfirmingFire,
-    DumpingWrongShell,
+    Aiming,
+    WaitingForFire,
+    ResourceBlocked,
     BackToIdle,
     Finished,
     Failed,
@@ -33,6 +24,7 @@ public class ArtilleryTask {
     public float angel;
     public float distance;
     public Vector3 position;
+    public EntityLocation? location;
     public BulletType bulletType;
     public Progress progress;
 }

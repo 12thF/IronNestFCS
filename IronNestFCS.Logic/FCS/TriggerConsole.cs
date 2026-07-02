@@ -27,8 +27,7 @@ public class TriggerConsole {
         }
 
         if (buttons.Count != 5) {
-            MelonLogger.Error("[FCS] TriggerConsole: expected 5 check switches, found " + buttons.Count);
-            return false;
+            MelonLogger.Error("Can't bind trigger console.");
         }
         _taskCheck = buttons[0];
         _bulletCheck = buttons[1];
@@ -49,34 +48,37 @@ public class TriggerConsole {
     }
 
     public void Fire() {
+        if (!FcsSceneInteractor.IsInteractive) return;
         _fire?.AddEnergy(255);
     }
 
     public IEnumerator Arm(LeftRight leftRight) {
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         var arm = leftRight == LeftRight.Left ? _armLeft : _armRight;
         arm.OnClickDown();
+        yield return FcsSceneInteractor.WaitUntilInteractive();
         yield return new WaitForSeconds(0.2f);
         arm.OnClickUp();
         yield return new WaitForSeconds(1f);
     }
     
     public IEnumerator ConfirmTask() {
-        yield return FcsSceneInteractor.WaitAndClick(_taskCheck);
+        yield return FcsSceneInteractor.WaitAndClick(_taskCheck, label: "ConfirmTask");
     }
 
     public IEnumerator ConfirmBullet() {
-        yield return FcsSceneInteractor.WaitAndClick(_bulletCheck);
+        yield return FcsSceneInteractor.WaitAndClick(_bulletCheck, label: "ConfirmBullet");
     }
 
     public IEnumerator ConfirmRotation() {
-        yield return FcsSceneInteractor.WaitAndClick(_rotationCheck);
+        yield return FcsSceneInteractor.WaitAndClick(_rotationCheck, label: "ConfirmRotation");
     }
 
     public IEnumerator ConfirmElevation() {
-        yield return FcsSceneInteractor.WaitAndClick(_elevationCheck);
+        yield return FcsSceneInteractor.WaitAndClick(_elevationCheck, label: "ConfirmElevation");
     }
 
     public IEnumerator ReadyToFire() {
-        yield return FcsSceneInteractor.WaitAndClick(_readyFire);
+        yield return FcsSceneInteractor.WaitAndClick(_readyFire, label: "ReadyToFire");
     }
 }

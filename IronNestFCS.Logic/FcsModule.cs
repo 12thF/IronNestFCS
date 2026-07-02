@@ -2,8 +2,6 @@ using Il2Cpp;
 using IronNestFCS.Abstractions;
 using IronNestFCS.Logic.FCS;
 using MelonLoader;
-using System.Linq;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -11,26 +9,19 @@ namespace IronNestFCS.Logic;
 
 public class FcsModule : IFcsModule
 {
-    private const int RoleArtillery = 128;
-    private const int RoleFortification = 65536;
-    private const int RoleTank = 262144;
-    private const int RoleAlly = 2;
-    private const int RoleEnemy = 1;
-    private const int RoleTarget = 32;
-
     private readonly FSC fcs = new();
     private FcsWindow? window;
     private TacticalRadar? radar;
 
     private bool autoSweep;
     private readonly HashSet<EntityLocation> swept = new(new EntityLocationComparer());
+    private float lastIdleSweepTime;
 
     public bool Initialize()
     {
         window = new FcsWindow(fcs);
         radar = new TacticalRadar(fcs);
-        bool bound = fcs.TryBind();
-        return bound;
+        return fcs.TryBind();
     }
 
     public void Update()
@@ -38,39 +29,40 @@ public class FcsModule : IFcsModule
         fcs.Update();
         radar?.Update();
 
+        if (fcs.AutomaticFireHalted && autoSweep)
+        {
+            autoSweep = false;
+            swept.Clear();
+            MelonLogger.Warning($"[FCS] Auto sweep disabled: {fcs.AutomaticFireHaltReason}");
+        }
+
         if (window != null) window.AutoSweepEnabled = autoSweep;
 
         if (autoSweep && radar != null && fcs.IsBound)
         {
-            var alive = radar.AliveUnits;
-            var sorted = alive.OrderByDescending(u => GetPriority(u.Location)).ToList();
-            foreach (var unit in sorted)
+            EnqueueNewSweepTargets();
+            if (fcs.PendingCount == 0 && !fcs.HasActiveTasks && Time.time - lastIdleSweepTime > 3f)
             {
-                if (unit.Location != null && swept.Add(unit.Location))
-                {
-                    int prio = GetPriority(unit.Location);
-                    if (prio >= 3)
-                        fcs.FireAtWorldPosFront(swept.Count, unit.WorldPos);
-                    else
-                        fcs.FireAtWorldPos(swept.Count, unit.WorldPos);
-                }
+                lastIdleSweepTime = Time.time;
+                SweepCurrentHostiles(forceRequeueAlive: true);
             }
-            if (swept.Count > 200) swept.Clear();
         }
 
         var kb = Keyboard.current;
-        if (kb == null || !fcs.IsBound)
-            return;
-
-        bool ctrl = kb.ctrlKey.isPressed;
+        if (kb == null || !fcs.IsBound) return;
+        var ctrl = kb.ctrlKey.isPressed;
 
         if (kb.numpad0Key.wasPressedThisFrame || (ctrl && kb.digit0Key.wasPressedThisFrame))
         {
+            if (fcs.AutomaticFireHalted)
+            {
+                fcs.ClearAutomaticFireHalt();
+            }
             autoSweep = !autoSweep;
             if (autoSweep)
             {
                 if (radar != null) radar.AutoPlaceMarkers = true;
-                SweepAllHostiles();
+                SweepCurrentHostiles(forceRequeueAlive: true);
             }
             return;
         }
@@ -83,106 +75,109 @@ public class FcsModule : IFcsModule
         if (kb.numpadPlusKey.wasPressedThisFrame) { AdjustAllValves(999f); return; }
         if (kb.numpad7Key.wasPressedThisFrame || (ctrl && kb.digit7Key.wasPressedThisFrame)) { fcs.AbortGun(LeftRight.Left); return; }
         if (kb.numpad8Key.wasPressedThisFrame || (ctrl && kb.digit8Key.wasPressedThisFrame)) { fcs.AbortGun(LeftRight.Right); return; }
-        if (kb.numpad9Key.wasPressedThisFrame || (ctrl && kb.digit9Key.wasPressedThisFrame)) { fcs.AbortGun(LeftRight.Left); fcs.AbortGun(LeftRight.Right); return; }
+        if (kb.numpad9Key.wasPressedThisFrame || (ctrl && kb.digit9Key.wasPressedThisFrame)) { fcs.AbortAllGuns(); return; }
         if (kb.numpad1Key.wasPressedThisFrame || (ctrl && kb.digit1Key.wasPressedThisFrame)) fcs.FireTarget(1);
         else if (kb.numpad2Key.wasPressedThisFrame || (ctrl && kb.digit2Key.wasPressedThisFrame)) fcs.FireTarget(2);
         else if (kb.numpad3Key.wasPressedThisFrame || (ctrl && kb.digit3Key.wasPressedThisFrame)) fcs.FireTarget(3);
         else if (kb.numpad4Key.wasPressedThisFrame || (ctrl && kb.digit4Key.wasPressedThisFrame)) fcs.FireTarget(4);
     }
 
-    /// <summary>NumpadPlus/Minus: 控制所有蒸汽阀门开/关</summary>
+    /// <summary>Numpad +/-：实验性批量调节所有蒸汽泄漏点附近的阀门。</summary>
     private static void AdjustAllValves(float value)
     {
         var all = GameObject.FindObjectsOfType<GameObject>();
-        MelonLogger.Msg($"[Valve] Setting all valves to {value}...");
-        // 先缓存所有 DialInteractable 引用
-        var dials = new List<(DialInteractable di, Vector3 pos)>();
+        var dials = new List<DialInteractable>();
         foreach (var go in all)
         {
             if (go == null) continue;
-            var di = go.GetComponent<DialInteractable>();
-            if (di != null) dials.Add((di, go.transform.position));
+            var dial = go.GetComponent<DialInteractable>();
+            if (dial != null) dials.Add(dial);
         }
-        int done = 0;
-        foreach (var go in all)
+
+        MelonLogger.Msg($"[Valve] Setting all steam valves to {value}...");
+        var done = 0;
+        foreach (var leak in all)
         {
-            if (go == null || !go.name.ToLower().Contains("steam leak")) continue;
-            DialInteractable? nearestDi = null;
-            float minDist = float.MaxValue;
-            foreach (var (di, pos) in dials)
+            if (leak == null) continue;
+            var name = leak.name?.ToLowerInvariant();
+            if (name == null || !name.Contains("steam leak")) continue;
+
+            DialInteractable? nearest = null;
+            var minDistance = float.MaxValue;
+            foreach (var dial in dials)
             {
-                var d = (pos - go.transform.position).magnitude;
-                if (d < minDist) { minDist = d; nearestDi = di; }
+                if (dial == null || dial.gameObject == null) continue;
+                var distance = (dial.transform.position - leak.transform.position).magnitude;
+                if (distance >= minDistance) continue;
+                minDistance = distance;
+                nearest = dial;
             }
-            if (nearestDi == null) continue;
-            nearestDi.SetDialValue(value);
+
+            if (nearest == null) continue;
+            nearest.SetDialValue(value);
             done++;
         }
-        MelonLogger.Msg($"[Valve] Set {done} valves to {value}.");
+        MelonLogger.Msg($"[Valve] Set {done} steam valves to {value}.");
     }
 
-    private static int GetPriority(EntityLocation? loc)
-    {
-        if (loc == null) return 1;
-        try
-        {
-            var entityProp = loc.GetType().GetProperty("Entity", BindingFlags.Public | BindingFlags.Instance);
-            if (entityProp == null) return 1;
-            var entity = entityProp.GetValue(loc);
-            if (entity == null) return 1;
-            var entType = entity.GetType();
-
-            var roleProp = entType.GetProperty("Role", BindingFlags.Public | BindingFlags.Instance);
-            int roleVal = -1;
-            if (roleProp != null)
-            {
-                var v = roleProp.GetValue(entity);
-                if (v is int i) roleVal = i;
-                else if (v is Enum e) roleVal = Convert.ToInt32(e);
-            }
-
-            int stars = 0;
-            var starsProp = entType.GetProperty("Stars", BindingFlags.Public | BindingFlags.Instance);
-            if (starsProp != null) { var sv = starsProp.GetValue(entity); if (sv is int si) stars = si; }
-
-            bool isFdc = false;
-            var iconProp = entType.GetProperty("Icon", BindingFlags.Public | BindingFlags.Instance);
-            if (iconProp != null) { var v = iconProp.GetValue(entity); if (v is string s && s.ToLower().Contains("fire direction")) isFdc = true; }
-
-            if (roleVal >= 0)
-            {
-                if ((roleVal & RoleAlly) != 0) return 0;
-                if (stars >= 3) return 4;
-                if (isFdc) return 4;
-                if ((roleVal & RoleArtillery) != 0) return 4;
-                if (stars >= 1) return 3;
-                if ((roleVal & RoleEnemy) != 0 || (roleVal & RoleTarget) != 0)
-                {
-                    bool armored = (roleVal & RoleFortification) != 0 || (roleVal & RoleTank) != 0;
-                    return armored ? 3 : 2;
-                }
-            }
-            if (iconProp != null) { var v2 = iconProp.GetValue(entity); if (v2 is string s2 && s2.ToLower().Contains("enemy")) return 2; }
-        }
-        catch { }
-        return 1;
-    }
-
-    private void SweepAllHostiles()
+    /// <summary>持续扫荡时，只把新发现且未扫过的存活敌对目标按优先级加入队列。</summary>
+    private void EnqueueNewSweepTargets()
     {
         var alive = radar?.AliveUnits;
         if (alive == null || alive.Count == 0) return;
-        var sorted = alive.OrderByDescending(u => GetPriority(u.Location)).ToList();
-        for (int i = 0; i < sorted.Count; i++)
+        PruneSweptTargets(alive);
+        foreach (var unit in SortByTargetPriority(alive))
         {
-            if (sorted[i].Location != null)
-                swept.Add(sorted[i].Location);
-            int prio = GetPriority(sorted[i].Location);
-            if (prio >= 3)
-                fcs.FireAtWorldPosFront(i + 1, sorted[i].WorldPos);
-            else
-                fcs.FireAtWorldPos(i + 1, sorted[i].WorldPos);
+            if (unit.Location != null && swept.Add(unit.Location))
+            {
+                EnqueueSweepUnit(unit, swept.Count);
+            }
         }
+    }
+
+    /// <summary>只保留当前仍存活的扫描目标，避免无尽模式同位置刷新后被旧记录挡住。</summary>
+    private void PruneSweptTargets(List<UnitEntry> alive)
+    {
+        var aliveLocations = alive
+            .Where(unit => unit.Location != null)
+            .Select(unit => unit.Location!)
+            .ToHashSet(new EntityLocationComparer());
+        swept.RemoveWhere(loc => !aliveLocations.Contains(loc));
+    }
+
+    /// <summary>重新扫描当前存活目标并按优先级入队，用于开启扫荡或队列空闲时补扫。</summary>
+    private void SweepCurrentHostiles(bool forceRequeueAlive)
+    {
+        var alive = radar?.AliveUnits;
+        if (alive == null || alive.Count == 0) return;
+        if (forceRequeueAlive)
+        {
+            swept.Clear();
+            foreach (var unit in alive)
+            {
+                if (unit.Location != null) swept.Add(unit.Location);
+            }
+        }
+        var sorted = SortByTargetPriority(alive);
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            EnqueueSweepUnit(sorted[i], i + 1);
+        }
+    }
+
+    /// <summary>任务统一普通入队；FSC 内部会按目标优先级排序，同级再用角度近远提速。</summary>
+    private void EnqueueSweepUnit(UnitEntry unit, int id)
+    {
+        fcs.FireAtWorldPos(id, unit.WorldPos, unit.Location);
+    }
+
+    /// <summary>按杀伤优先级排序；角度近远不在这里抢高星目标，只在 FSC 队列中作为同级优化。</summary>
+    private static List<UnitEntry> SortByTargetPriority(IEnumerable<UnitEntry> units)
+    {
+        return units
+            .OrderByDescending(u => TargetPriority.GetPriority(u.Location))
+            .ThenByDescending(u => TargetPriority.GetStars(u.Location))
+            .ToList();
     }
 
     public void OnGui()
