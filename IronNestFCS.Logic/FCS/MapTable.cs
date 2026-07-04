@@ -65,6 +65,23 @@ public class MapTable {
         markerLocations[index] = location;
     }
 
+    public bool TryUpdateTaskFromWorldPos(ArtilleryTask task, Vector3 worldPos, EntityLocation? location = null)
+    {
+        if (turret == null || mapSurface == null) return false;
+
+        var localPos = mapSurface.InverseTransformPoint(worldPos);
+        var target = localPos - turret.localPosition;
+        var dist = target.magnitude * 3.8164f;
+        var angle = Vector3.SignedAngle(target, Vector3.up, Vector3.forward);
+        if (angle < 0) angle += 360;
+
+        task.angel = angle;
+        task.distance = dist;
+        task.position = localPos * 3.8164f + new Vector3(10.016f, 5.235f, 0f);
+        if (location != null) task.location = location;
+        return true;
+    }
+
     public void ResetMarker(int index)
     {
         if (!artilleries.TryGetValue(index, out var marker)) return;

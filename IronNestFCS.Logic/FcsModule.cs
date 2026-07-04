@@ -61,14 +61,25 @@ public class FcsModule : IFcsModule
             autoSweep = !autoSweep;
             if (autoSweep)
             {
-                if (radar != null) radar.AutoPlaceMarkers = true;
+                if (radar != null) {
+                    radar.AutoPlaceMarkers = true;
+                    fcs.ManualMarkerPriorityMode = false;
+                    radar.ForceScan();
+                }
                 SweepCurrentHostiles(forceRequeueAlive: true);
             }
             return;
         }
         if (kb.numpad5Key.wasPressedThisFrame || (ctrl && kb.digit5Key.wasPressedThisFrame))
         {
-            if (radar != null) radar.AutoPlaceMarkers = !radar.AutoPlaceMarkers;
+            if (radar != null) {
+                radar.AutoPlaceMarkers = !radar.AutoPlaceMarkers;
+                fcs.ManualMarkerPriorityMode = !radar.AutoPlaceMarkers;
+                MelonLogger.Msg($"[FCS] Marker mode: {(radar.AutoPlaceMarkers ? "Auto" : "Manual priority")}");
+                if (radar.AutoPlaceMarkers) {
+                    radar.ForceScan();
+                }
+            }
             return;
         }
         if (kb.numpadMinusKey.wasPressedThisFrame) { AdjustAllValves(0f); return; }

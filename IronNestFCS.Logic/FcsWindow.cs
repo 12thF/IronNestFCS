@@ -101,8 +101,9 @@ public class FcsWindow
 
         foreach (var item in queuePreview)
         {
+            var marker = item.manualPriority ? "M" : " ";
             GUI.Label(new Rect(x, y, w, h),
-                $"  T{item.targetId}  {ConvertPosition(item.position)}  {item.angel,5:F1}°/{item.distance,5:F2}km  {item.bulletType}");
+                $"{marker} T{item.targetId}  {ConvertPosition(item.position)}  {item.angel,5:F1}°/{item.distance,5:F2}km  {item.bulletType}");
             y += lineH;
         }
     }
@@ -128,7 +129,8 @@ public class FcsWindow
         };
 
         GUI.color = stateColor;
-        GUI.Label(new Rect(x, y, w, h), $"{label} T{task.targetId}  {task.bulletType}  {task.progress}");
+        var marker = task.manualPriority ? "M " : "";
+        GUI.Label(new Rect(x, y, w, h), $"{label} {marker}T{task.targetId}  {task.bulletType}  {task.progress}");
         GUI.color = oldColor;
         y += lineH;
 

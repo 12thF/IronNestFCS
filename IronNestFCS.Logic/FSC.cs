@@ -92,6 +92,7 @@ public class FSC
     private TurretSweepDirection _turretSweepDirection = TurretSweepDirection.None;
     public bool AutomaticFireHalted { get; private set; }
     public string? AutomaticFireHaltReason { get; private set; }
+    public bool ManualMarkerPriorityMode { get; set; }
     public FSC() {
         this._sceneInteractor = new FcsSceneInteractor(this);
         _activeTargets = new HashSet<EntityLocation>(_entityLocationComparer);
@@ -140,6 +141,47 @@ public class FSC
     /// <summary>把扫描到的目标插到打击队列最前面。</summary>
     public void FireAtWorldPosFront(int id, Vector3 worldPos, EntityLocation? location = null) {
         _sceneInteractor.FireAtWorldPosFront(id, worldPos, location);
+    }
+
+    /// <summary>雷达重新扫描后，只刷新尚未分配给炮位的候选任务；正在执行的左右炮任务不动。</summary>
+    public void RefreshQueuedTargetsFromRadar(IEnumerable<UnitEntry> aliveUnits) {
+        if (!IsBound || _taskQueue.Count == 0) {
+            return;
+        }
+
+        var alive = aliveUnits
+            .Where(unit => unit.IsAlive && unit.Location != null)
+            .ToList();
+        if (alive.Count == 0) {
+            return;
+        }
+
+        var refreshed = 0;
+        var dropped = 0;
+        var existing = _taskQueue.ToArray();
+        _taskQueue.Clear();
+
+        foreach (var task in existing) {
+            if (!IsTaskAlive(task)) {
+                MelonLogger.Msg($"[FCS] Drop destroyed queued target T{task.targetId} during radar refresh.");
+                ReleaseTaskTarget(task);
+                dropped++;
+                continue;
+            }
+
+            var match = task.location == null
+                ? null
+                : alive.FirstOrDefault(unit => unit.Location != null && _entityLocationComparer.Equals(unit.Location, task.location));
+            if (match != null && MapTable.TryUpdateTaskFromWorldPos(task, match.WorldPos, match.Location)) {
+                refreshed++;
+            }
+
+            _taskQueue.Enqueue(task);
+        }
+
+        if (refreshed > 0 || dropped > 0) {
+            MelonLogger.Msg($"[FCS] Radar refreshed queued targets: updated={refreshed}, dropped={dropped}.");
+        }
     }
     
     /// <summary>中止单门炮：停止协程、释放方向机预占，并把未完成任务放回队列。</summary>
@@ -394,6 +436,10 @@ public class FSC
     /// <summary>加入调度队列，并在有空闲炮位时立即派发。</summary>
     public void EnqueueTask(ArtilleryTask task) {
         if (!CanQueueTask(task)) {
+            if (task.manualPriority && PromoteQueuedDuplicateToManualPriority(task)) {
+                MelonLogger.Msg($"[FCS] Promote queued target T{task.targetId} to manual priority.");
+                TryDispatch();
+            }
             return;
         }
         task.progress = Progress.Pending;
@@ -404,6 +450,10 @@ public class FSC
     /// <summary>把任务插到队首。</summary>
     public void EnqueueTaskFront(ArtilleryTask task) {
         if (!CanQueueTask(task)) {
+            if (task.manualPriority && PromoteQueuedDuplicateToManualPriority(task)) {
+                MelonLogger.Msg($"[FCS] Promote queued target T{task.targetId} to manual priority.");
+                TryDispatch();
+            }
             return;
         }
         task.progress = Progress.Pending;
@@ -420,6 +470,10 @@ public class FSC
 
     private static int TaskStars(ArtilleryTask task) {
         return TargetPriority.GetStars(task.location);
+    }
+
+    private static int ManualPriority(ArtilleryTask task) {
+        return task.manualPriority ? 1 : 0;
     }
 
     private float TurretDeltaForSort(ArtilleryTask task) {
@@ -527,8 +581,10 @@ public class FSC
         var direction = _turretSweepDirection;
 
         while (remaining.Count > 0 && result.Count < limit) {
-            var maxPriority = remaining.Max(TaskPriority);
-            var priorityBand = remaining.Where(task => TaskPriority(task) == maxPriority).ToList();
+            var maxManualPriority = remaining.Max(ManualPriority);
+            var manualBand = remaining.Where(task => ManualPriority(task) == maxManualPriority).ToList();
+            var maxPriority = manualBand.Max(TaskPriority);
+            var priorityBand = manualBand.Where(task => TaskPriority(task) == maxPriority).ToList();
             var maxStars = priorityBand.Max(TaskStars);
             var starBand = priorityBand.Where(task => TaskStars(task) == maxStars).ToList();
             var orderedBand = OrderByTurretSweep(starBand, referenceAngle, direction);
@@ -712,6 +768,19 @@ public class FSC
         return _taskQueue.Any(item => IsSameTarget(item, task));
     }
 
+    private bool PromoteQueuedDuplicateToManualPriority(ArtilleryTask task) {
+        foreach (var item in _taskQueue) {
+            if (!IsSameTarget(item, task)) {
+                continue;
+            }
+            item.manualPriority = true;
+            item.targetId = task.targetId;
+            item.bulletType = task.bulletType;
+            return true;
+        }
+        return false;
+    }
+
     private void ReserveTaskTarget(ArtilleryTask task) {
         if (task.location != null) {
             _activeTargets.Add(task.location);
@@ -773,7 +842,8 @@ public class FSC
         var existing = _taskQueue.ToArray();
         var compatible = existing
             .Where(item => IsTaskAlive(item) && IsCompatibleWithAvailablePowder(item, shell, availablePowder))
-            .OrderBy(TurretDeltaForSort)
+            .OrderByDescending(ManualPriority)
+            .ThenBy(TurretDeltaForSort)
             .ThenByDescending(TaskPriority)
             .ThenByDescending(TaskStars)
             .ThenByDescending(RequiredPowder)
@@ -807,6 +877,7 @@ public class FSC
             }
             markerTask.targetId = targetId;
             markerTask.bulletType = shell;
+            markerTask.manualPriority = ManualMarkerPriorityMode;
             if (!MapTable.IsMarkerInsideTacticalMap(targetId)) {
                 continue;
             }
@@ -821,7 +892,8 @@ public class FSC
         }
 
         matched = candidates
-            .OrderBy(TurretDeltaForSort)
+            .OrderByDescending(ManualPriority)
+            .ThenBy(TurretDeltaForSort)
             .ThenByDescending(TaskPriority)
             .ThenByDescending(TaskStars)
             .ThenByDescending(RequiredPowder)
@@ -903,7 +975,8 @@ public class FSC
         var existing = _taskQueue.ToArray();
         var compatible = existing
             .Where(item => IsTaskAlive(item) && IsCompatibleLoadedTask(item, shell, actualPowder))
-            .OrderBy(TurretDeltaForSort)
+            .OrderByDescending(ManualPriority)
+            .ThenBy(TurretDeltaForSort)
             .ThenByDescending(TaskPriority)
             .ThenByDescending(TaskStars)
             .ThenBy(task => actualPowder > 0 ? actualPowder - RequiredPowder(task) : 0)
@@ -937,6 +1010,7 @@ public class FSC
             }
             markerTask.targetId = targetId;
             markerTask.bulletType = shell;
+            markerTask.manualPriority = ManualMarkerPriorityMode;
             if (!MapTable.IsMarkerInsideTacticalMap(targetId)) {
                 continue;
             }
@@ -951,7 +1025,8 @@ public class FSC
         }
 
         matched = candidates
-            .OrderBy(TurretDeltaForSort)
+            .OrderByDescending(ManualPriority)
+            .ThenBy(TurretDeltaForSort)
             .ThenByDescending(TaskPriority)
             .ThenByDescending(TaskStars)
             .ThenBy(task => actualPowder > 0 ? actualPowder - RequiredPowder(task) : 0)

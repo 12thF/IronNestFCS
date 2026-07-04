@@ -61,6 +61,12 @@ public class TacticalRadar
         }
     }
 
+    public void ForceScan()
+    {
+        ScanForUnits();
+        lastScanTime = Time.time;
+    }
+
     private void ScanForUnits()
     {
         try
@@ -156,6 +162,7 @@ public class TacticalRadar
             fcs.MapTable.ClearMarkerLocations();
         }
 
+        fcs.RefreshQueuedTargetsFromRadar(alive);
         FlushLog();
     }
 

@@ -101,6 +101,7 @@ public class FcsSceneInteractor {
                 }
                 task.targetId = targetId;
                 task.bulletType = selectedBulletType;
+                task.manualPriority = fcs.ManualMarkerPriorityMode;
                 fcs.EnqueueTask(task);
                 SetColor(button, Color.gray);
                 button.GetComponent<Collider>().enabled = false;
@@ -132,6 +133,7 @@ public class FcsSceneInteractor {
         if (task == null) return;
         task.targetId = targetId;
         task.bulletType = selectedBulletType;
+        task.manualPriority = fcs.ManualMarkerPriorityMode;
         fcs.EnqueueTask(task);
         SetColor(button, Color.gray);
         button.GetComponent<Collider>().enabled = false;

@@ -27,4 +27,5 @@ public class ArtilleryTask {
     public EntityLocation? location;
     public BulletType bulletType;
     public Progress progress;
+    public bool manualPriority;
 }
